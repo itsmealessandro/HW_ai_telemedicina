@@ -1,392 +1,191 @@
-"""
-agents/intelligent_agent.py - Agente Intelligente per Analisi Parametri
 
-Questo modulo implementa l'agente intelligente che analizza i parametri vitali
-e determina il livello di rischio del paziente.
-
-L'agente utilizza un sistema a regole basato su:
-1. Analisi individuale di ogni parametro
-2. Valutazione della gravità delle anomalie
-3. Analisi delle correlazioni tra parametri
-4. Determinazione del rischio globale
-
-Output dell'agente:
-- Livello di rischio: BASSO, MEDIO, ALTO
-- Lista anomalie rilevate
-- Raccomandazioni personalizzate
-- Flag per allerta medico
-"""
-
-from models.vital_parameters import VitalParameters
 from typing import Dict, List
+from models.vital_parameters import VitalParameters
+import os
+import joblib
 
 
 class IntelligentAgent:
     """
-    Agente intelligente per l'analisi dei parametri vitali.
-    
-    Implementa un sistema esperto basato su regole mediche che:
-    - Analizza ogni parametro vitale
-    - Identifica anomalie e loro gravità
-    - Correla parametri per identificare pattern patologici
-    - Genera raccomandazioni personalizzate
-    - Decide quando allertare il medico
+    Agente intelligente basato su Supervised Learning per il monitoraggio
+    dei parametri vitali in un sistema di telemedicina.
+
+    L'agente utilizza:
+    - Un modello di machine learning supervisionato (se disponibile)
+    - Regole di sicurezza simboliche (fallback e override)
     """
-    
+
+    MODEL_PATH = "models/risk_classifier.pkl"
+
     def __init__(self):
-        """Inizializza l'agente con le regole di analisi"""
-        self.regole_correlazione = self._inizializza_regole_correlazione()
-    
+        """Inizializza l'agente caricando il modello supervisionato."""
+        self.model = self._load_model()
+
+    # ============================================================
+    # API PUBBLICA (immutabile, usata da main.py)
+    # ============================================================
+
     def analizza_parametri(self, parametri: VitalParameters) -> Dict:
         """
-        Analisi completa dei parametri vitali.
-        
-        Processo di analisi:
-        1. Validazione formale dei parametri
-        2. Identificazione anomalie individuali
-        3. Analisi correlazioni tra parametri
-        4. Calcolo livello rischio globale
-        5. Generazione raccomandazioni
-        
-        Args:
-            parametri: Oggetto VitalParameters con i valori misurati
-        
+        Analizza i parametri vitali e restituisce una valutazione clinica.
+
         Returns:
-            Dict con:
-                - livello_rischio: str ('basso', 'medio', 'alto')
-                - anomalie: List[str] descrizioni anomalie
-                - raccomandazioni: str consigli per il paziente
-                - allerta_medico: bool flag per notifica medico
-                - dettagli_analisi: Dict con informazioni dettagliate
+            Dict conforme all'interfaccia attesa dal main.py
         """
-        
-        # Step 1: Validazione parametri
+
+        # 1. Validazione
         valido, errori = parametri.valida_parametri()
         if not valido:
-            return {
-                'livello_rischio': 'errore',
-                'anomalie': errori,
-                'raccomandazioni': 'Parametri non validi. Controllare le misurazioni.',
-                'allerta_medico': True,
-                'dettagli_analisi': {'errori_validazione': errori}
-            }
-        
-        # Step 2: Identificazione anomalie
+            return self._errore_output(errori)
+
+        # 2. Estrazione feature
+        features = self._extract_features(parametri)
+
+        # 3. Predizione ML (o fallback)
+        rischio_predetto = self._predict_risk(features)
+
+        # 4. Safety override (regole cliniche critiche)
+        rischio_finale = self._safety_override(parametri, rischio_predetto)
+
+        # 5. Identificazione anomalie (per spiegabilità)
         anomalie = parametri.identifica_anomalie()
-        
-        # Step 3: Analisi correlazioni
-        pattern_critici = self._analizza_correlazioni(parametri, anomalie)
-        
-        # Step 4: Calcolo livello rischio
-        livello_rischio = self._calcola_livello_rischio(anomalie, pattern_critici)
-        
-        # Step 5: Generazione raccomandazioni
+
+        # 6. Raccomandazioni
         raccomandazioni = self._genera_raccomandazioni(
-            parametri, 
-            anomalie, 
-            pattern_critici, 
-            livello_rischio
+            rischio_finale, anomalie
         )
-        
-        # Step 6: Decisione allerta medico
-        allerta_medico = self._richiede_allerta_medico(livello_rischio, anomalie, pattern_critici)
-        
-        # Formattazione anomalie per output
-        anomalie_descrizione = self._formatta_anomalie(anomalie)
-        
+
+        # 7. Allerta medico
+        allerta_medico = rischio_finale == "alto"
+
         return {
-            'livello_rischio': livello_rischio,
-            'anomalie': anomalie_descrizione,
-            'raccomandazioni': raccomandazioni,
-            'allerta_medico': allerta_medico,
-            'dettagli_analisi': {
-                'numero_anomalie': len(anomalie),
-                'pattern_critici': pattern_critici,
-                'anomalie_dettagliate': anomalie
+            "livello_rischio": rischio_finale,
+            "anomalie": self._formatta_anomalie(anomalie),
+            "raccomandazioni": raccomandazioni,
+            "allerta_medico": allerta_medico,
+            "dettagli_analisi": {
+                "modello_usato": "supervised_ml" if self.model else "rule_based_fallback",
+                "numero_anomalie": len(anomalie),
             }
         }
-    
-    def _calcola_livello_rischio(self, anomalie: List[Dict], pattern_critici: List[str]) -> str:
+
+    # ============================================================
+    # MACHINE LEARNING
+    # ============================================================
+
+    def _load_model(self):
+        """Carica il modello supervisionato se presente."""
+        if os.path.exists(self.MODEL_PATH):
+            try:
+                return joblib.load(self.MODEL_PATH)
+            except Exception as e:
+                print(f"⚠️ Errore caricamento modello ML: {e}")
+        return None
+
+    def _extract_features(self, parametri: VitalParameters) -> List[float]:
+        """Trasforma i parametri vitali in feature numeriche."""
+        return [
+            parametri.pressione_sistolica,
+            parametri.pressione_diastolica,
+            parametri.frequenza_cardiaca,
+            parametri.temperatura,
+            parametri.saturazione_ossigeno,
+            parametri.glicemia
+        ]
+
+    def _predict_risk(self, features: List[float]) -> str:
         """
-        Calcola il livello di rischio globale del paziente.
-        
-        Logica di calcolo:
-        - ALTO: presenza di anomalie critiche o pattern pericolosi
-        - MEDIO: presenza di anomalie moderate o multiple lievi
-        - BASSO: nessuna anomalia o solo anomalie lievi isolate
-        
-        Args:
-            anomalie: Lista anomalie identificate
-            pattern_critici: Lista pattern patologici rilevati
-        
-        Returns:
-            str: 'basso', 'medio', 'alto'
+        Predice il livello di rischio tramite ML.
+        Fallback a regole statiche se il modello non è disponibile.
         """
-        
-        # Nessuna anomalia -> rischio basso
-        if len(anomalie) == 0:
-            return 'basso'
-        
-        # Pattern critici identificati -> rischio alto
-        if len(pattern_critici) > 0:
-            return 'alto'
-        
-        # Conta anomalie per gravità
-        critiche = sum(1 for a in anomalie if a['gravita'] == 'critica')
-        moderate = sum(1 for a in anomalie if a['gravita'] == 'moderata')
-        lievi = sum(1 for a in anomalie if a['gravita'] == 'lieve')
-        
-        # Almeno un'anomalia critica -> rischio alto
-        if critiche > 0:
-            return 'alto'
-        
-        # Più di una moderata O più di due lievi -> rischio medio
-        if moderate > 1 or lievi > 2:
-            return 'medio'
-        
-        # Una moderata O 1-2 lievi -> rischio medio
-        if moderate > 0 or lievi > 0:
-            return 'medio'
-        
-        return 'basso'
-    
-    def _analizza_correlazioni(self, parametri: VitalParameters, anomalie: List[Dict]) -> List[str]:
+        if self.model:
+            return self.model.predict([features])[0]
+        return self._rule_based_fallback(features)
+
+    # ============================================================
+    # REGOLE DI SICUREZZA (OVERRIDE)
+    # ============================================================
+
+    def _safety_override(self, parametri: VitalParameters, rischio_ml: str) -> str:
         """
-        Analizza correlazioni tra parametri per identificare pattern patologici.
-        
-        Pattern monitorati:
-        - Shock ipovolemico: ipotensione + tachicardia
-        - Insufficienza respiratoria: ipossia + tachicardia
-        - Crisi ipertensiva: ipertensione grave + tachicardia
-        - Ipoglicemia severa: glicemia bassa + tachicardia
-        - Infezione sistemica: febbre + tachicardia
-        
-        Args:
-            parametri: Parametri vitali misurati
-            anomalie: Anomalie già identificate
-        
-        Returns:
-            List[str]: Pattern critici identificati
+        Regole cliniche critiche che hanno priorità sul modello ML.
         """
-        pattern = []
-        
-        # Pattern 1: Possibile shock (pressione bassa + frequenza alta)
-        if (parametri.pressione_sistolica < 90 and 
-            parametri.frequenza_cardiaca > 100):
-            pattern.append("SHOCK POSSIBILE: Ipotensione con tachicardia compensatoria")
-        
-        # Pattern 2: Crisi ipertensiva (pressione molto alta)
-        if (parametri.pressione_sistolica >= 180 or 
-            parametri.pressione_diastolica >= 110):
-            pattern.append("CRISI IPERTENSIVA: Pressione arteriosa pericolosamente elevata")
-        
-        # Pattern 3: Insufficienza respiratoria (ipossia + compenso cardiaco)
-        if (parametri.saturazione_ossigeno < 92 and 
-            parametri.frequenza_cardiaca > 100):
-            pattern.append("INSUFFICIENZA RESPIRATORIA: Ipossia con tachicardia compensatoria")
-        
-        # Pattern 4: Sepsi/infezione grave (febbre alta + tachicardia)
-        if (parametri.temperatura >= 38.5 and 
-            parametri.frequenza_cardiaca > 100):
-            pattern.append("INFEZIONE SISTEMICA: Febbre elevata con risposta cardiaca")
-        
-        # Pattern 5: Ipoglicemia severa con compenso
-        if (parametri.glicemia < 60 and 
-            parametri.frequenza_cardiaca > 100):
-            pattern.append("IPOGLICEMIA SEVERA: Glicemia critica con tachicardia")
-        
-        # Pattern 6: Ipertermia critica
-        if parametri.temperatura >= 39.5:
-            pattern.append("IPERTERMIA CRITICA: Temperatura pericolosamente elevata")
-        
-        # Pattern 7: Ipossia severa
+
         if parametri.saturazione_ossigeno < 88:
-            pattern.append("IPOSSIA SEVERA: Saturazione ossigeno critica")
-        
-        return pattern
-    
-    def _genera_raccomandazioni(
-        self, 
-        parametri: VitalParameters, 
-        anomalie: List[Dict],
-        pattern_critici: List[str],
-        livello_rischio: str
-    ) -> str:
+            return "alto"
+
+        if parametri.pressione_sistolica >= 180:
+            return "alto"
+
+        if parametri.temperatura >= 39.5:
+            return "alto"
+
+        if parametri.glicemia < 60:
+            return "alto"
+
+        return rischio_ml
+
+    # ============================================================
+    # FALLBACK RULE-BASED (semplice)
+    # ============================================================
+
+    def _rule_based_fallback(self, features: List[float]) -> str:
         """
-        Genera raccomandazioni personalizzate basate sull'analisi.
-        
-        Le raccomandazioni sono graduali in base al rischio:
-        - ALTO: richiedere assistenza medica immediata
-        - MEDIO: contattare il medico, monitoraggio ravvicinato
-        - BASSO: consigli di lifestyle e monitoraggio standard
-        
-        Args:
-            parametri: Parametri vitali
-            anomalie: Anomalie identificate
-            pattern_critici: Pattern patologici
-            livello_rischio: Livello rischio calcolato
-        
-        Returns:
-            str: Raccomandazioni testuali per il paziente
+        Valutazione deterministica usata solo se ML non disponibile.
         """
-        
-        # Rischio ALTO: intervento urgente
-        if livello_rischio == 'alto':
-            if len(pattern_critici) > 0:
-                return (
-                    "⚠️ ATTENZIONE: Rilevati parametri critici che richiedono valutazione medica IMMEDIATA. "
-                    "Si raccomanda di recarsi al pronto soccorso o chiamare il 118. "
-                    f"Pattern identificati: {', '.join(pattern_critici[:2])}."
-                )
-            else:
-                return (
-                    "⚠️ ATTENZIONE: Parametri vitali significativamente alterati. "
-                    "Contattare IMMEDIATAMENTE il proprio medico o recarsi al pronto soccorso. "
-                    "Non attendere il miglioramento spontaneo."
-                )
-        
-        # Rischio MEDIO: monitoraggio e contatto medico
-        if livello_rischio == 'medio':
-            raccomandazioni = [
-                "Contattare il proprio medico entro 24 ore per valutazione.",
-                "Ripetere la misurazione dei parametri vitali tra 4-6 ore."
-            ]
-            
-            # Raccomandazioni specifiche per parametro
-            for anomalia in anomalie:
-                param = anomalia['parametro']
-                
-                if 'Pressione' in param:
-                    if anomalia['valore'] > anomalia['range_normale'][1]:
-                        raccomandazioni.append("Ridurre il consumo di sale e riposare.")
-                    else:
-                        raccomandazioni.append("Mantenersi idratati e evitare alzate brusche.")
-                
-                elif 'Frequenza Cardiaca' in param:
-                    if anomalia['valore'] > anomalia['range_normale'][1]:
-                        raccomandazioni.append("Evitare sforzi fisici e caffeina.")
-                    else:
-                        raccomandazioni.append("Evitare attività che richiedono prontezza.")
-                
-                elif 'Temperatura' in param:
-                    if anomalia['valore'] > anomalia['range_normale'][1]:
-                        raccomandazioni.append("Assumere antipiretici se prescritti e mantenersi idratati.")
-                
-                elif 'Saturazione' in param:
-                    raccomandazioni.append("Respirare profondamente e stare in ambiente ventilato.")
-                
-                elif 'Glicemia' in param:
-                    if anomalia['valore'] > anomalia['range_normale'][1]:
-                        raccomandazioni.append("Evitare cibi zuccherati e verificare terapia diabetica.")
-                    else:
-                        raccomandazioni.append("Assumere zuccheri semplici (succo, miele) e riposare.")
-            
-            return " ".join(raccomandazioni[:3])  # Limita a 3 raccomandazioni
-        
-        # Rischio BASSO: monitoraggio standard
+        ps, pd, fc, t, spo2, g = features
+
+        if spo2 < 90 or ps > 170 or t > 39:
+            return "alto"
+
+        if fc > 100 or g < 70 or g > 180:
+            return "medio"
+
+        return "basso"
+
+    # ============================================================
+    # RACCOMANDAZIONI
+    # ============================================================
+
+    def _genera_raccomandazioni(self, rischio: str, anomalie: List[Dict]) -> str:
+        if rischio == "alto":
+            return (
+                "⚠️ Parametri critici rilevati. "
+                "Recarsi immediatamente al pronto soccorso o contattare il medico."
+            )
+
+        if rischio == "medio":
+            return (
+                "📌 Parametri alterati. "
+                "Contattare il medico entro 24 ore e ripetere le misurazioni."
+            )
+
         return (
-            "✅ Parametri vitali nella norma o con lievi variazioni. "
-            "Continuare il monitoraggio regolare. "
-            "Mantenere uno stile di vita sano con alimentazione equilibrata e attività fisica regolare. "
-            "Ripetere la misurazione come da programma di follow-up."
+            "✅ Parametri nella norma. "
+            "Continuare il monitoraggio regolare e mantenere uno stile di vita sano."
         )
-    
-    def _richiede_allerta_medico(
-        self, 
-        livello_rischio: str, 
-        anomalie: List[Dict],
-        pattern_critici: List[str]
-    ) -> bool:
-        """
-        Determina se è necessario allertare il medico.
-        
-        Criteri per allerta:
-        - Livello rischio ALTO
-        - Presenza di pattern critici
-        - Anomalie critiche multiple
-        
-        Args:
-            livello_rischio: Livello rischio calcolato
-            anomalie: Anomalie identificate
-            pattern_critici: Pattern patologici
-        
-        Returns:
-            bool: True se serve allerta medico
-        """
-        
-        # Rischio alto -> sempre allertare
-        if livello_rischio == 'alto':
-            return True
-        
-        # Pattern critici -> sempre allertare
-        if len(pattern_critici) > 0:
-            return True
-        
-        # Anomalie critiche multiple -> allertare
-        critiche = sum(1 for a in anomalie if a['gravita'] == 'critica')
-        if critiche >= 2:
-            return True
-        
-        return False
-    
+
+    # ============================================================
+    # UTILITÀ
+    # ============================================================
+
     def _formatta_anomalie(self, anomalie: List[Dict]) -> List[str]:
-        """
-        Formatta le anomalie in descrizioni testuali leggibili.
-        
-        Args:
-            anomalie: Lista anomalie con dettagli
-        
-        Returns:
-            List[str]: Descrizioni testuali delle anomalie
-        """
-        if len(anomalie) == 0:
-            return []
-        
         descrizioni = []
         for a in anomalie:
-            min_norm, max_norm = a['range_normale']
-            
-            # Determina se è alto o basso
-            if a['valore'] > max_norm:
-                direzione = "elevata"
-            else:
-                direzione = "bassa"
-            
-            desc = (
+            min_n, max_n = a["range_normale"]
+            direzione = "alta" if a["valore"] > max_n else "bassa"
+            descrizioni.append(
                 f"{a['parametro']}: {a['valore']} {a['unita']} "
-                f"({direzione}, normale: {min_norm}-{max_norm} {a['unita']}) "
-                f"[Gravità: {a['gravita'].upper()}]"
+                f"({direzione}, normale {min_n}-{max_n}) "
+                f"[{a['gravita'].upper()}]"
             )
-            descrizioni.append(desc)
-        
         return descrizioni
-    
-    def _inizializza_regole_correlazione(self) -> Dict:
-        """
-        Inizializza le regole per l'analisi delle correlazioni.
-        
-        Queste regole potrebbero essere espanse in futuro con:
-        - Machine learning per pattern recognition
-        - Regole personalizzate per patologie specifiche
-        - Integrazione con storia clinica del paziente
-        
-        Returns:
-            Dict: Dizionario con regole di correlazione
-        """
+
+    def _errore_output(self, errori: List[str]) -> Dict:
         return {
-            'shock_pattern': {
-                'condizioni': ['pressione_bassa', 'tachicardia'],
-                'gravita': 'critica',
-                'azione': 'intervento_immediato'
-            },
-            'respiratory_failure': {
-                'condizioni': ['ipossia', 'tachicardia'],
-                'gravita': 'critica',
-                'azione': 'intervento_immediato'
-            },
-            'hypertensive_crisis': {
-                'condizioni': ['ipertensione_severa'],
-                'gravita': 'critica',
-                'azione': 'intervento_urgente'
-            }
+            "livello_rischio": "errore",
+            "anomalie": errori,
+            "raccomandazioni": "Parametri non validi. Verificare le misurazioni.",
+            "allerta_medico": True,
+            "dettagli_analisi": {"errori": errori}
         }
