@@ -20,10 +20,14 @@ from sklearn.metrics import classification_report, confusion_matrix
 # CONFIGURAZIONE
 # ============================================================
 
-DB_PATH = "database/telemedicina.db"
-MODEL_OUTPUT_PATH = "models/risk_classifier.pkl"
-RANDOM_STATE = 42
+import os
 
+BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+
+RANDOM_STATE = 42  # numero qualsiasi, serve per riproducibilità
+DB_PATH = "telemedicina.db"
+
+MODEL_OUTPUT_PATH = os.path.join(BASE_DIR, "models", "risk_classifier.pkl")
 
 # ============================================================
 # ESTRAZIONE DATI
