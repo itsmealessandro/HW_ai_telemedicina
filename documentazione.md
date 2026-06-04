@@ -577,6 +577,14 @@ AZIONE RICHIESTA: Valutazione clinica urgente
 
 ## Agente Intelligente - Approfondimento
 
+### Implementazione attuale
+
+L'implementazione di riferimento in questa versione e un agente rule-based in
+`agents/intelligent_agent.py`: usa regole deterministiche per calcolare il
+livello di rischio, identificare pattern critici, generare raccomandazioni e
+decidere l'allerta medico. Le sezioni su ML qui sotto rappresentano estensioni
+future e non sono attive nel prototipo attuale.
+
 ### Perché Sistema a Regole vs Machine Learning?
 
 **Approccio Attuale: Rule-Based Expert System**
@@ -747,7 +755,7 @@ psql telemedicina < dump_converted.sql
 progetto_telemedicina/
 │
 ├── main.py                    # Entry point
-├── DOCUMENTAZIONE.md          # Questo file
+├── documentazione.md          # Questo file
 ├── telemedicina.db           # Database (creato automaticamente)
 │
 ├── models/

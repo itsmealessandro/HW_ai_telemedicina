@@ -15,7 +15,7 @@ Ogni parametro ha range di normalità definiti per l'analisi.
 """
 
 from dataclasses import dataclass
-from typing import Dict, List
+from typing import Dict, List, Tuple
 
 
 @dataclass
@@ -57,7 +57,7 @@ class VitalParameters:
         'glicemia_bassa': (60, 'bassa')
     }
     
-    def valida_parametri(self) -> tuple[bool, List[str]]:
+    def valida_parametri(self) -> Tuple[bool, List[str]]:
         """
         Valida che tutti i parametri siano in range fisiologicamente possibili.
         Non valida se sono "normali", ma solo se sono valori plausibili.

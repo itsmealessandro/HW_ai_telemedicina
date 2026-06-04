@@ -147,6 +147,7 @@ def visualizza_storico(db_manager):
         print(f"Frequenza Cardiaca: {row[5]} bpm")
         print(f"Temperatura: {row[6]}°C")
         print(f"Saturazione O2: {row[7]}%")
+        print(f"Glicemia: {row[11]} mg/dL")
         print(f"Raccomandazioni: {row[10]}")
         print("-"*80)
 
@@ -168,6 +169,7 @@ def visualizza_alert(db_manager):
         print(f"Data: {row[8]}")
         print(f"Livello Rischio: {row[9]}")
         print(f"Allerta Medico: {'Sì' if row[11] else 'No'}")
+        print(f"Glicemia: {row[11]} mg/dL")
         print(f"Raccomandazioni: {row[10]}")
         print("="*80)
 

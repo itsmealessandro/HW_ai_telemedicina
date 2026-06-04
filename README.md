@@ -26,7 +26,7 @@ cd progetto_telemedicina
 # 2. Verifica struttura file
 progetto_telemedicina/
 ├── main.py
-├── DOCUMENTAZIONE.md
+├── documentazione.md
 ├── README.md
 ├── models/
 │   ├── __init__.py
@@ -65,7 +65,7 @@ python main.py
 
 ## 📖 Documentazione Completa
 
-Per una comprensione approfondita del sistema, consulta **`DOCUMENTAZIONE.md`** che include:
+Per una comprensione approfondita del sistema, consulta **`documentazione.md`** che include:
 
 - Architettura dettagliata del sistema
 - Spiegazione di ogni componente
@@ -187,12 +187,12 @@ A: Modifica `VitalParameters` in `models/vital_parameters.py`, aggiungi regole i
 A: Sì, il database supporta N pazienti. Per multi-medico serve aggiungere autenticazione e ruoli.
 
 **Q: Posso integrare con dispositivi IoT?**
-A: Struttura modulare facilita integrazione. Vedi sezione "Integrazione Dispositivi IoT" in DOCUMENTAZIONE.md.
+A: Struttura modulare facilita integrazione. Vedi sezione "Integrazione Dispositivi IoT" in documentazione.md.
 
 ## 🤝 Contributi
 
 Questo è un progetto didattico. Per miglioramenti:
-1. Studia DOCUMENTAZIONE.md per comprendere architettura
+1. Studia documentazione.md per comprendere architettura
 2. Segui pattern esistenti per coerenza
 3. Documenta ogni modifica
 4. Testa approfonditamente
@@ -210,7 +210,7 @@ Sistema di Telemedicina - Progetto Universitario
 
 - 🐛 Bug/Issue: [GitHub Issues]
 - 💬 Domande: [Email supporto]
-- 📖 Docs: DOCUMENTAZIONE.md
+- 📖 Docs: documentazione.md
 
 ---
 

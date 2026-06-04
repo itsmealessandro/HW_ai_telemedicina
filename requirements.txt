@@ -1,3 +1,1 @@
-scikit-learn==1.3.2
-joblib==1.3.2
-numpy==1.26.4
+# Nessuna dipendenza esterna richiesta (solo standard library)
