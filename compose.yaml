@@ -1,0 +1,77 @@
+services:
+  redis:
+    image: redis:alpine
+    ports:
+      - "6379"
+    networks:
+      - mapek-net
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  monitor:
+    build:
+      dockerfile: docker/monitor.Dockerfile
+      context: .
+    ports:
+      - "8001"
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks:
+      - mapek-net
+    environment:
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+      SERVICE_PORT: "8001"
+
+  analyzer:
+    build:
+      dockerfile: docker/analyzer.Dockerfile
+      context: .
+    ports:
+      - "8010"
+    depends_on:
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./data:/data
+    networks:
+      - mapek-net
+    environment:
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+      SERVICE_PORT: "8010"
+
+  executor:
+    build:
+      dockerfile: docker/executor.Dockerfile
+      context: .
+    ports:
+      - "8020"
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks:
+      - mapek-net
+    environment:
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+      SERVICE_PORT: "8020"
+
+  frontend:
+    build:
+      dockerfile: docker/nginx.Dockerfile
+      context: .
+    ports:
+      - "80:80"
+    depends_on:
+      - executor
+    networks:
+      - mapek-net
+
+networks:
+  mapek-net:
+    driver: bridge

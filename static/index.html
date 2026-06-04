@@ -1,0 +1,330 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Telemedicina — Monitoraggio MAPE-K</title>
+    <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<div x-data="dashboard()" x-init="init()" class="app">
+
+    <!-- ── Header ── -->
+    <div class="header">
+        <div>
+            <h1>🏥 Telemedicina — Monitoraggio Autonomico</h1>
+            <div class="subtitle">Ciclo MAPE-K · Agente RL con Q-table</div>
+        </div>
+        <div>
+            <span x-show="wsConnected" style="color:#4CAF50;font-size:0.85em;">● Connesso</span>
+            <span x-show="!wsConnected" style="color:#F44336;font-size:0.85em;">● Disconnesso</span>
+        </div>
+    </div>
+
+    <!-- ── Stats Bar ── -->
+    <div class="stats-bar" x-show="view === 'overview'">
+        <div class="stat-card">
+            <div class="value" x-text="stats.totale || 0"></div>
+            <div class="label">Totale Pazienti</div>
+        </div>
+        <div class="stat-card green">
+            <div class="value" x-text="stats.rischio_basso || 0"></div>
+            <div class="label">🟢 Rischio Basso</div>
+        </div>
+        <div class="stat-card orange">
+            <div class="value" x-text="stats.rischio_medio || 0"></div>
+            <div class="label">🟠 Rischio Medio</div>
+        </div>
+        <div class="stat-card red">
+            <div class="value" x-text="stats.rischio_alto || 0"></div>
+            <div class="label">🔴 Rischio Alto</div>
+        </div>
+        <div class="stat-card" style="background:#fff3e0;">
+            <div class="value" style="color:#E65100;" x-text="stats.alert || 0"></div>
+            <div class="label">🚨 Alert Medico</div>
+        </div>
+    </div>
+
+    <!-- ================================================================ -->
+    <!-- ── OVERVIEW VIEW ── -->
+    <!-- ================================================================ -->
+    <div class="container" x-show="view === 'overview'">
+        <template x-if="patients.length === 0">
+            <div style="text-align:center;padding:60px;color:#999;">
+                <p style="font-size:1.2em;">⏳ In attesa dei dati dai servizi MAPE-K...</p>
+                <p style="margin-top:8px;font-size:0.9em;">Verifica che monitor, analyzer ed executor siano attivi.</p>
+            </div>
+        </template>
+
+        <div class="patients-grid" x-show="patients.length > 0">
+            <template x-for="p in sortedPatients" :key="p.paziente_id">
+                <div class="patient-card" :class="'risk-' + (p.livello_rischio || 'basso')">
+
+                    <!-- ── Patient Header ── -->
+                    <div class="patient-header">
+                        <span class="patient-name" x-text="p.nome"></span>
+                        <span class="risk-badge" :class="riskBadgeClass(p.livello_rischio)"
+                              x-text="(p.livello_rischio || 'basso').toUpperCase()"></span>
+                    </div>
+
+                    <!-- ── MONITOR -- ── -->
+                    <div class="mapek-phase m">
+                        <div class="phase-title">📊 MONITOR — Parametri Vitali</div>
+                        <div class="vitals">
+                            <span>PA <b x-text="round(p.pressione_sistolica) + '/' + round(p.pressione_diastolica)"></b></span>
+                            <span>FC <b x-text="round(p.frequenza_cardiaca)"></b> bpm</span>
+                            <span>T <b x-text="round(p.temperatura, 1)"></b> °C</span>
+                            <span>SpO2 <b x-text="round(p.saturazione_ossigeno)"></b>%</span>
+                            <span>Glicemia <b x-text="round(p.glicemia)"></b> mg/dL</span>
+                        </div>
+                    </div>
+
+                    <!-- ── ANALYZE ── -->
+                    <div class="mapek-phase a" x-show="p.q_values && Object.keys(p.q_values).length > 0">
+                        <div class="phase-title">🔍 ANALYZE — Q-values per Azione</div>
+                        <div class="q-values">
+                            <template x-for="(val, act) in p.q_values" :key="act">
+                                <div class="q-row">
+                                    <span class="q-label" x-text="act.replace(/_/g, ' ')"></span>
+                                    <div class="q-bar-track">
+                                        <div class="q-bar-fill" :class="qBarClass(val, isMaxQ(p.paziente_id, act))"
+                                             :style="'width: ' + qBarWidth(val)"></div>
+                                    </div>
+                                    <span class="q-value" :class="isMaxQ(p.paziente_id, act) ? 'max' : ''"
+                                          x-text="val.toFixed(1)"></span>
+                                </div>
+                            </template>
+                        </div>
+                    </div>
+
+                    <!-- ── PLAN ── -->
+                    <div class="mapek-phase p">
+                        <div class="phase-title">🎯 PLAN — Azione Decisa</div>
+                        <div>
+                            <span class="action-badge" :class="actionClass(p.azione)"
+                                  x-text="actionBadgeHTML(p.azione)"></span>
+                            <template x-if="p.allerta_medico">
+                                <span style="margin-left:8px;color:#D32F2F;font-weight:600;">🔔 Allerta Medico</span>
+                            </template>
+                        </div>
+                        <div class="recommendation" x-text="p.raccomandazioni"></div>
+                    </div>
+
+                    <!-- ── EXECUTE ── -->
+                    <div class="mapek-phase e">
+                        <div class="phase-title">✅ EXECUTE — Azioni Eseguite</div>
+                        <div class="execute-info">
+                            <span class="tag">📡 WebSocket push</span>
+                            <span class="tag" x-show="p.allerta_medico" style="background:#ffebee;color:#D32F2F;">🚑 Allerta inviata</span>
+                            <span class="tag" x-show="!p.allerta_medico">✅ Nessuna allerta</span>
+                        </div>
+                    </div>
+
+                    <!-- ── Dettaglio Button ── -->
+                    <button class="btn btn-primary" @click="selectPatient(p.paziente_id)">
+                        Dettaglio paziente →
+                    </button>
+                </div>
+            </template>
+        </div>
+    </div>
+
+    <!-- ================================================================ -->
+    <!-- ── DETAIL VIEW ── -->
+    <!-- ================================================================ -->
+    <div class="container" x-show="view === 'detail'" x-cloak>
+        <button class="btn btn-back" @click="goBack()">← Torna alla panoramica</button>
+
+        <template x-if="!selectedPatient">
+            <div style="text-align:center;padding:60px;color:#999;">
+                <p>Paziente non trovato o in attesa di dati...</p>
+            </div>
+        </template>
+
+        <template x-if="selectedPatient">
+            <div>
+                <!-- ── Detail Header ── -->
+                <div class="detail-header">
+                    <h2 x-text="selectedPatient.nome"></h2>
+                    <div class="detail-meta">
+                        <span x-text="'ID: ' + selectedPatient.paziente_id"></span>
+                        <span style="margin-left:16px;">
+                            Rischio:
+                            <span class="risk-badge" :class="riskBadgeClass(selectedPatient.livello_rischio)"
+                                  x-text="(selectedPatient.livello_rischio || 'basso').toUpperCase()"></span>
+                        </span>
+                        <span style="margin-left:16px;">
+                            Azione:
+                            <span class="action-badge" :class="actionClass(selectedPatient.azione)"
+                                  x-text="actionBadgeHTML(selectedPatient.azione)"></span>
+                        </span>
+                    </div>
+                </div>
+
+                <div class="detail-grid">
+                    <!-- ── MONITOR: Vitals ── -->
+                    <div class="detail-section">
+                        <h3>📊 MONITOR — Parametri Vitali</h3>
+                        <div class="vitals-detail">
+                            <div class="vital-item">
+                                <div class="vital-name">PA Sistolica</div>
+                                <div class="vital-value" :class="vitalClass(selectedPatient.pressione_sistolica, 90, 140)"
+                                     x-text="round(selectedPatient.pressione_sistolica, 1)"></div>
+                                <div class="vital-unit">mmHg</div>
+                                <div class="vital-bar">
+                                    <div class="bar-fill" :class="vitalBarClass(selectedPatient.pressione_sistolica, 90, 140)"
+                                         :style="'width:' + vitalBarWidth(selectedPatient.pressione_sistolica, 50, 250)"></div>
+                                </div>
+                            </div>
+                            <div class="vital-item">
+                                <div class="vital-name">PA Diastolica</div>
+                                <div class="vital-value" :class="vitalClass(selectedPatient.pressione_diastolica, 60, 90)"
+                                     x-text="round(selectedPatient.pressione_diastolica, 1)"></div>
+                                <div class="vital-unit">mmHg</div>
+                                <div class="vital-bar">
+                                    <div class="bar-fill" :class="vitalBarClass(selectedPatient.pressione_diastolica, 60, 90)"
+                                         :style="'width:' + vitalBarWidth(selectedPatient.pressione_diastolica, 30, 150)"></div>
+                                </div>
+                            </div>
+                            <div class="vital-item">
+                                <div class="vital-name">Frequenza Cardiaca</div>
+                                <div class="vital-value" :class="vitalClass(selectedPatient.frequenza_cardiaca, 60, 100)"
+                                     x-text="round(selectedPatient.frequenza_cardiaca, 1)"></div>
+                                <div class="vital-unit">bpm</div>
+                                <div class="vital-bar">
+                                    <div class="bar-fill" :class="vitalBarClass(selectedPatient.frequenza_cardiaca, 60, 100)"
+                                         :style="'width:' + vitalBarWidth(selectedPatient.frequenza_cardiaca, 30, 200)"></div>
+                                </div>
+                            </div>
+                            <div class="vital-item">
+                                <div class="vital-name">Temperatura</div>
+                                <div class="vital-value" :class="vitalClass(selectedPatient.temperatura, 36.0, 37.5)"
+                                     x-text="round(selectedPatient.temperatura, 1)"></div>
+                                <div class="vital-unit">°C</div>
+                                <div class="vital-bar">
+                                    <div class="bar-fill" :class="vitalBarClass(selectedPatient.temperatura, 36.0, 37.5)"
+                                         :style="'width:' + vitalBarWidth(selectedPatient.temperatura, 34, 42)"></div>
+                                </div>
+                            </div>
+                            <div class="vital-item">
+                                <div class="vital-name">SpO2</div>
+                                <div class="vital-value" :class="vitalClass(selectedPatient.saturazione_ossigeno, 95, 100)"
+                                     x-text="round(selectedPatient.saturazione_ossigeno, 1)"></div>
+                                <div class="vital-unit">%</div>
+                                <div class="vital-bar">
+                                    <div class="bar-fill" :class="vitalBarClass(selectedPatient.saturazione_ossigeno, 95, 100)"
+                                         :style="'width:' + vitalBarWidth(selectedPatient.saturazione_ossigeno, 70, 100)"></div>
+                                </div>
+                            </div>
+                            <div class="vital-item">
+                                <div class="vital-name">Glicemia</div>
+                                <div class="vital-value" :class="vitalClass(selectedPatient.glicemia, 70, 140)"
+                                     x-text="round(selectedPatient.glicemia, 1)"></div>
+                                <div class="vital-unit">mg/dL</div>
+                                <div class="vital-bar">
+                                    <div class="bar-fill" :class="vitalBarClass(selectedPatient.glicemia, 70, 140)"
+                                         :style="'width:' + vitalBarWidth(selectedPatient.glicemia, 20, 500)"></div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- ── ANALYZE + PLAN ── -->
+                    <div class="detail-section">
+                        <h3>🔍 ANALYZE — Q-values</h3>
+                        <div class="q-values" x-show="selectedPatient.q_values">
+                            <template x-for="(val, act) in selectedPatient.q_values" :key="act">
+                                <div class="q-row" style="margin-bottom:4px;">
+                                    <span class="q-label" x-text="act.replace(/_/g, ' ')"></span>
+                                    <div class="q-bar-track" style="height:20px;">
+                                        <div class="q-bar-fill" :class="qBarClass(val, isMaxQ(selectedPatient.paziente_id, act))"
+                                             :style="'width: ' + qBarWidth(val)"></div>
+                                    </div>
+                                    <span class="q-value" :class="isMaxQ(selectedPatient.paziente_id, act) ? 'max' : ''"
+                                          x-text="val.toFixed(1)"></span>
+                                </div>
+                            </template>
+                        </div>
+
+                        <hr style="margin:16px 0;border:none;border-top:1px solid #eee;">
+
+                        <h3>🎯 PLAN — Azione Decisa</h3>
+                        <div style="margin-top:8px;">
+                            <span class="action-badge" :class="actionClass(selectedPatient.azione)"
+                                  style="font-size:1em;padding:4px 16px;"
+                                  x-text="actionBadgeHTML(selectedPatient.azione)"></span>
+                            <template x-if="selectedPatient.allerta_medico">
+                                <span style="margin-left:12px;color:#D32F2F;font-weight:700;">🔔 Allerta Medico ATTIVA</span>
+                            </template>
+                        </div>
+                        <div class="recommendation" style="margin-top:10px;font-size:1em;"
+                             x-text="selectedPatient.raccomandazioni"></div>
+
+                        <hr style="margin:16px 0;border:none;border-top:1px solid #eee;">
+
+                        <h3>✅ EXECUTE — Azioni Eseguite</h3>
+                        <div class="execute-info" style="margin-top:8px;">
+                            <span class="tag">📡 WebSocket push</span>
+                            <span class="tag" x-show="selectedPatient.allerta_medico" style="background:#ffebee;color:#D32F2F;">🚑 Allerta medico inviata</span>
+                            <span class="tag">🕐 Tempo reale (3s)</span>
+                        </div>
+                    </div>
+
+                    <!-- ── History ── -->
+                    <div class="detail-section full">
+                        <h3>📜 Storico Azioni (ultime rilevazioni)</h3>
+                        <div style="overflow-x:auto;">
+                            <table class="history-table">
+                                <thead>
+                                    <tr>
+                                        <th>Ora</th>
+                                        <th>PA Sis</th>
+                                        <th>PA Dia</th>
+                                        <th>FC</th>
+                                        <th>Temp</th>
+                                        <th>SpO2</th>
+                                        <th>Glicemia</th>
+                                        <th>Azione</th>
+                                        <th>Rischio</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <template x-for="(s, i) in history" :key="i">
+                                        <tr>
+                                            <td x-text="s.timestamp"></td>
+                                            <td x-text="round(s.pressione_sistolica)"></td>
+                                            <td x-text="round(s.pressione_diastolica)"></td>
+                                            <td x-text="round(s.frequenza_cardiaca)"></td>
+                                            <td x-text="round(s.temperatura, 1)"></td>
+                                            <td x-text="round(s.saturazione_ossigeno)"></td>
+                                            <td x-text="round(s.glicemia)"></td>
+                                            <td>
+                                                <span class="action-badge" :class="actionClass(s.azione)"
+                                                      style="font-size:0.8em;"
+                                                      x-text="s.azione"></span>
+                                            </td>
+                                            <td>
+                                                <span class="risk-badge" :class="riskBadgeClass(s.livello_rischio)"
+                                                      style="font-size:0.75em;"
+                                                      x-text="s.livello_rischio"></span>
+                                            </td>
+                                        </tr>
+                                    </template>
+                                </tbody>
+                            </table>
+                        </div>
+                        <div x-show="history.length === 0" style="text-align:center;padding:20px;color:#999;">
+                            Storico non disponibile — in attesa di dati...
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </template>
+    </div>
+</div>
+
+<script src="app.js"></script>
+</body>
+</html>
