@@ -4,6 +4,7 @@ cli.py - Interfaccia a riga di comando del sistema di telemedicina.
 
 import sys
 import os
+import time
 import numpy as np
 from telemedicina.services.analysis_service import AnalysisService
 from telemedicina.models.vital_parameters import VitalParameters
@@ -223,8 +224,47 @@ def mostra_riepilogo_rl(agent):
     print("=" * 60 + "\n")
 
 
+def _mostra_qtable_snapshot(qtable, qtable_prev, label):
+    GRN = "\033[92m"
+    RED = "\033[91m"
+    BOLD = "\033[1m"
+    RST = "\033[0m"
+    AZN = ["monitoring", "contatta_m", "pronto_s", "emergenza"]
+    COL = 10
+
+    non_zero = np.argwhere(qtable != 0)
+    stati = sorted(set(int(s) for s, _ in non_zero))
+    if not stati:
+        return
+
+    print(f"\n  {BOLD}Q-table {label}{RST}")
+    hdr = f"  {'Stato':>6} | "
+    hdr += " | ".join(f"{a:>{COL}}" for a in AZN)
+    print(hdr)
+    print(f"  {'-'*6}-+-{'-'*COL}-+-{'-'*COL}-+-{'-'*COL}-+-{'-'*COL}")
+
+    for idx in stati:
+        vals = qtable[idx]
+        if qtable_prev is not None and idx < qtable_prev.shape[0]:
+            pv = qtable_prev[idx]
+            cells = []
+            for v, prev in zip(vals, pv):
+                s = f"{v:>{COL}.2f}"
+                if v > prev:
+                    cells.append(f"{GRN}{s}{RST}")
+                elif v < prev:
+                    cells.append(f"{RED}{s}{RST}")
+                else:
+                    cells.append(s)
+        else:
+            cells = [f"{v:>{COL}.2f}" for v in vals]
+        print(f"  {idx:>6d} | {' | '.join(cells)}")
+
+
 def addestra_rl():
     from telemedicina.agents.rl_environment import SimPatientEnv
+
+    start = time.perf_counter()
 
     print("=" * 60)
     print("ADDESTRAMENTO AGENTE RL (Q-LEARNING)")
@@ -232,7 +272,7 @@ def addestra_rl():
 
     agent = QLearningAgent()
     env = SimPatientEnv()
-    finestra = 500
+    step = max(1, config.RL_EPISODI // 10)
 
     print(f"\nParametri:")
     print(f"  Episodi: {config.RL_EPISODI}")
@@ -244,6 +284,7 @@ def addestra_rl():
     print("-" * 50)
 
     rewards = []
+    qtable_prev = None
     for ep in range(1, config.RL_EPISODI + 1):
         severita = env.reset()
         parametri = env.parametri
@@ -260,29 +301,41 @@ def addestra_rl():
                 break
         agent.decadi_epsilon()
         rewards.append(reward_ep)
-        if ep % finestra == 0:
-            media = np.mean(rewards[-finestra:])
+        if ep % step == 0:
+            media = np.mean(rewards[-step:])
             non_zero = int(np.count_nonzero(agent.q_table))
             print(f"{ep:>8} | {media:>+12.2f} | {agent.epsilon:>6.3f} | {non_zero:>8}")
 
-    media_finale = np.mean(rewards[-finestra:])
+            label = f"dopo {ep} episodi"
+            if qtable_prev is not None:
+                label += f" (Δ da {ep - step})"
+            _mostra_qtable_snapshot(agent.q_table, qtable_prev, label)
+            qtable_prev = agent.q_table.copy()
+
+    elapsed = time.perf_counter() - start
+    media_finale = np.mean(rewards[-step:])
     print("-" * 50)
-    print(f"\nTraining completato! Reward media finale: {media_finale:+.2f}")
+    print(f"\nTraining completato in {elapsed:.1f}s!")
+    print(f"Reward media finale: {media_finale:+.2f}")
     agent.salva_q_table()
     print(f"Q-table salvata in: {config.RL_QTABLE_PATH}")
 
+    return agent
 
-def main(modo_rl=False, force_retrain=False):
+
+def main(modo_rl=False, build_qt=False):
+    if build_qt:
+        agent = addestra_rl()
+        mostra_riepilogo_rl(agent)
+        print("Q-table pronta. Avvia con: python main.py -RL")
+        return
+
     print("Inizializzazione Sistema di Telemedicina...")
 
     if modo_rl:
         print("Modalita: RL (Q-learning)")
-        qtable_path = config.RL_QTABLE_PATH
-        if force_retrain or not os.path.exists(qtable_path):
-            if force_retrain:
-                print("Forza retrain richiesto. Avvio training...")
-            else:
-                print("Q-table non trovata. Avvio training automatico...")
+        if not os.path.exists(config.RL_QTABLE_PATH):
+            print("Q-table non trovata. Avvio training automatico...")
             addestra_rl()
         agent = QLearningAgent()
         agent.carica_q_table()
