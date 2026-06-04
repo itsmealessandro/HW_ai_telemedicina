@@ -1,5 +1,5 @@
 """
-dashboard.py - Dashboard web per il sistema di telemedicina.
+dashboard.py - Dashboard di monitoraggio实时 pazienti con agente RL.
 
 Usage:
   streamlit run dashboard.py
@@ -7,234 +7,299 @@ Usage:
 
 import os
 import sys
-
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "src"))
 
 import streamlit as st
-import numpy as np
 import pandas as pd
 
-from telemedicina.agents.rl_agent import QLearningAgent, AZIONI, N_BINS, SOGLIE
-from telemedicina.database.db_manager import DatabaseManager
+from telemedicina.monitoring import PatientMonitor
+from telemedicina.agents.rl_agent import AZIONI
 from telemedicina import config
 
-st.set_page_config(page_title="Telemedicina – Agente RL", page_icon="🏥", layout="wide")
+st.set_page_config(page_title="Telemedicina – Monitoraggio", page_icon="🏥", layout="wide")
 
-# ── Helpers ──
+# ── Avvio monitor ──
+
+monitor = PatientMonitor(num_pazienti=15)
+if not monitor.agente_pronto:
+    st.error("Q-table non trovata. Esegui `python main.py --build-qt`.")
+    st.stop()
+
+monitor.avvia()
+
+# ── Auto-refresh ──
+
+try:
+    from streamlit_autorefresh import st_autorefresh
+    st_autorefresh(interval=3000, key="monitor_refresh")
+except ImportError:
+    st.caption("ℹ️ Installa `streamlit-autorefresh` per aggiornamento automatico.")
+
+# ── Stato corrente ──
+
+stato = monitor.get_stato()
+stats = monitor.get_statistiche()
+
+# ── Sidebar / Navigazione ──
+
+st.sidebar.title("🏥 Telemedicina")
+pagina = st.sidebar.radio("Vista", ["Panoramica", "Dettaglio Paziente"])
+
+paziente_selezionato = st.sidebar.selectbox(
+    "Paziente",
+    options=[p["paziente_id"] for p in stato],
+    format_func=lambda pid: next(
+        (p["nome"] for p in stato if p["paziente_id"] == pid), pid
+    ),
+    key="paziente_sel",
+) if stato else None
+
+st.sidebar.divider()
+st.sidebar.metric("Cicli di aggiornamento", stats["cicli"])
+
+# ── Helper colore ──
+
+COLORE_RISCHIO = {
+    "basso": "#4CAF50",
+    "medio": "#FF9800",
+    "alto": "#F44336",
+}
+
+COLORE_AZIONE = {
+    "monitoring": "#4CAF50",
+    "contatta_medico": "#FF9800",
+    "pronto_soccorso": "#E65100",
+    "emergenza": "#D32F2F",
+}
+
+ETICHETTA_AZIONE = {
+    "monitoring": "🔍 Monitoraggio",
+    "contatta_medico": "📞 Contatta Medico",
+    "pronto_soccorso": "🚑 Pronto Soccorso",
+    "emergenza": "🚨 Emergenza",
+}
 
 
-def _decodifica_stato(idx):
-    bins = []
-    rest = idx
-    for i in range(5, -1, -1):
-        div = 1
-        for j in range(i):
-            div *= N_BINS[j]
-        b = rest // div
-        rest %= div
-        bins.append(b)
-    bins.reverse()
-    return bins
+def _badge(testo, colore):
+    return f'<span style="background:{colore};color:white;padding:2px 10px;border-radius:12px;font-weight:600;font-size:0.85em">{testo}</span>'
 
 
-def _label_bin(i, j):
-    s = SOGLIE[i]
-    if j == 0:
-        return f"<{s[0]}"
-    elif j == N_BINS[i] - 1:
-        return f">={s[N_BINS[i]-2]}"
-    return f"{s[j-1]}-{s[j]-1}"
+# ===========================================================================
+# 1. PANORAMICA
+# ===========================================================================
 
+if pagina == "Panoramica":
+    st.title("📊 Panoramica Pazienti")
+    st.caption("Aggiornato ogni 3 secondi — I parametri variano gradualmente nel tempo.")
 
-NOMI_PARAM = ["PA sis", "PA dia", "FC", "Temp", "SpO2", "Glic"]
+    col1, col2, col3, col4 = st.columns(4)
+    col1.metric("Totale Pazienti", stats["totale"])
+    col2.metric("🟢 Rischio Basso", stats["rischio_basso"])
+    col3.metric("🟠 Rischio Medio", stats["rischio_medio"])
+    col4.metric("🔴 Rischio Alto", stats["rischio_alto"])
 
+    st.divider()
 
-def _colore_qtext(v):
-    try:
-        val = float(v.split()[0])
-    except (ValueError, IndexError):
-        return ""
-    if val >= 15:
-        return "background-color: #1a9850; color: white"
-    if val >= 10:
-        return "background-color: #66bd63"
-    if val >= 5:
-        return "background-color: #a6d96a"
-    if val >= 0:
-        return "background-color: #fee08b"
-    if val >= -5:
-        return "background-color: #f46d43"
-    return "background-color: #a50026; color: white"
+    stato_sorted = sorted(
+        stato,
+        key=lambda p: (
+            0 if p["livello_rischio"] == "alto" else
+            1 if p["livello_rischio"] == "medio" else 2
+        ),
+    )
 
+    cols_per_row = 3
+    for i in range(0, len(stato_sorted), cols_per_row):
+        riga = stato_sorted[i : i + cols_per_row]
+        cols = st.columns(cols_per_row)
+        for col, p in zip(cols, riga):
+            rischio = p["livello_rischio"]
+            azione = p["azione"]
+            colore_r = COLORE_RISCHIO.get(rischio, "#999")
+            colore_a = COLORE_AZIONE.get(azione, "#999")
 
-def _colore_rischio(v):
-    c = {
-        "basso": "background-color: #4CAF50",
-        "medio": "background-color: #FF9800",
-        "alto": "background-color: #F44336; color: white",
+            with col:
+                st.markdown(
+                    f"""
+                    <div style="border:1px solid #ddd;border-radius:12px;padding:16px;margin-bottom:12px;
+                                border-left:6px solid {colore_r};">
+                        <div style="display:flex;justify-content:space-between;align-items:center;">
+                            <strong style="font-size:1.1em">{p['nome']}</strong>
+                            {_badge(rischio.upper(), colore_r)}
+                        </div>
+                        <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px 16px;margin:10px 0;font-size:0.9em;">
+                            <span>PA <b>{p['pressione_sistolica']:.0f}/{p['pressione_diastolica']:.0f}</b></span>
+                            <span>FC <b>{p['frequenza_cardiaca']:.0f}</b> bpm</span>
+                            <span>T <b>{p['temperatura']:.1f}</b> °C</span>
+                            <span>SpO2 <b>{p['saturazione_ossigeno']:.0f}</b>%</span>
+                            <span>Glicemia <b>{p['glicemia']:.0f}</b></span>
+                        </div>
+                        <div style="margin-top:6px;">
+                            {_badge(ETICHETTA_AZIONE.get(azione, azione), colore_a)}
+                            {' 🔔 Allerta Medico' if p['allerta_medico'] else ''}
+                        </div>
+                    </div>
+                    """,
+                    unsafe_allow_html=True,
+                )
+
+                if st.button("Dettaglio →", key=f"go_{p['paziente_id']}", use_container_width=True):
+                    st.session_state["pagina"] = "Dettaglio Paziente"
+                    st.session_state["paziente_sel"] = p["paziente_id"]
+                    st.rerun()
+
+# ===========================================================================
+# 2. DETTAGLIO PAZIENTE
+# ===========================================================================
+
+elif pagina == "Dettaglio Paziente" and paziente_selezionato:
+    dettaglio = monitor.get_paziente(paziente_selezionato)
+
+    if dettaglio is None:
+        st.warning("Paziente non trovato.")
+        st.stop()
+
+    rischio = dettaglio["livello_rischio"]
+    azione = dettaglio["azione"]
+    colore_r = COLORE_RISCHIO.get(rischio, "#999")
+
+    st.title(f"👤 {dettaglio['nome']}")
+    st.caption(f"ID: {dettaglio['paziente_id']} · Severità nascosta: {dettaglio['severita_label']}")
+
+    col1, col2, col3 = st.columns(3)
+    col1.metric("Livello Rischio", rischio.upper(), delta_color="inverse")
+    col2.metric("Azione Consigliata", ETICHETTA_AZIONE.get(azione, azione))
+    col3.metric("Allerta Medico", "🔔 Attiva" if dettaglio["allerta_medico"] else "✅ Nessuna")
+
+    st.divider()
+
+    # ── Parametri vitali ──
+
+    st.subheader("📋 Parametri Vitali (ultima rilevazione)")
+
+    PA_NORMALI = {
+        "pressione_sistolica": (90, 140),
+        "pressione_diastolica": (60, 90),
+        "frequenza_cardiaca": (60, 100),
+        "temperatura": (36.0, 37.5),
+        "saturazione_ossigeno": (95, 100),
+        "glicemia": (70, 140),
     }
-    return c.get(v, "")
 
+    parametri_visuali = [
+        ("Pressione Sistolica", f"{dettaglio['pressione_sistolica']:.1f} mmHg", dettaglio["pressione_sistolica"], 50, 250, 90, 140),
+        ("Pressione Diastolica", f"{dettaglio['pressione_diastolica']:.1f} mmHg", dettaglio["pressione_diastolica"], 30, 150, 60, 90),
+        ("Frequenza Cardiaca", f"{dettaglio['frequenza_cardiaca']:.1f} bpm", dettaglio["frequenza_cardiaca"], 30, 200, 60, 100),
+        ("Temperatura", f"{dettaglio['temperatura']:.1f} °C", dettaglio["temperatura"], 34, 42, 36.0, 37.5),
+        ("Saturazione O2", f"{dettaglio['saturazione_ossigeno']:.1f}%", dettaglio["saturazione_ossigeno"], 70, 100, 95, 100),
+        ("Glicemia", f"{dettaglio['glicemia']:.1f} mg/dL", dettaglio["glicemia"], 20, 500, 70, 140),
+    ]
 
-# ── Cache ──
+    row1 = st.columns(3)
+    row2 = st.columns(3)
+    for i, (nome, label, valore, vmin, vmax, rmin, rmax) in enumerate(parametri_visuali):
+        col = row1[i] if i < 3 else row2[i - 3]
+        with col:
+            progresso = (valore - vmin) / (vmax - vmin)
+            progresso = max(0.0, min(1.0, progresso))
+            pos_norm = (rmin - vmin) / (vmax - vmin)
+            pos_norm_end = (rmax - vmin) / (vmax - vmin)
 
+            in_range = rmin <= valore <= rmax
+            colore_bar = "#4CAF50" if in_range else "#F44336"
+            bg_color = "#e0e0e0"
 
-@st.cache_data
-def _load_history():
-    p = config.RL_QTABLES_HISTORY_PATH
-    if os.path.exists(p):
-        return np.load(p)
-    return None
+            bar_html = f"""
+            <div style="margin:12px 0;">
+                <div style="display:flex;justify-content:space-between;font-size:0.9em;">
+                    <strong>{nome}</strong>
+                    <span style="font-weight:600;color:{colore_bar};">{label}</span>
+                </div>
+                <div style="position:relative;height:24px;background:{bg_color};border-radius:12px;margin:4px 0;overflow:hidden;">
+                    <div style="position:absolute;left:{pos_norm*100:.1f}%;right:{100-pos_norm_end*100:.1f}%;height:100%;
+                                background:rgba(76,175,80,0.25);border-radius:2px;"></div>
+                    <div style="width:{progresso*100:.1f}%;height:100%;background:{colore_bar};border-radius:12px;
+                                transition:width 0.5s;min-width:4px;"></div>
+                </div>
+                <div style="display:flex;justify-content:space-between;font-size:0.75em;color:#666;">
+                    <span>{vmin}</span>
+                    <span style="color:#4CAF50;">norma {rmin}-{rmax}</span>
+                    <span>{vmax}</span>
+                </div>
+            </div>
+            """
+            st.markdown(bar_html, unsafe_allow_html=True)
 
+    st.divider()
 
-@st.cache_data
-def _load_patients():
-    try:
-        db = DatabaseManager(config.DB_PATH)
-        cur = db.conn.cursor()
-        cur.execute("SELECT * FROM interazioni ORDER BY timestamp DESC")
-        rows = [tuple(r) for r in cur.fetchall()]
-        db.chiudi()
-        return rows
-    except Exception:
-        return []
+    # ── Raccomandazione ──
 
+    st.subheader("💡 Raccomandazione")
+    rec_col1, rec_col2 = st.columns([3, 1])
+    with rec_col1:
+        st.info(dettaglio["raccomandazioni"])
+    with rec_col2:
+        azione_bt = ETICHETTA_AZIONE.get(azione, azione)
+        st.markdown(
+            f"<div style='text-align:center;padding:12px;background:{COLORE_AZIONE.get(azione,'#999')};"
+            f"color:white;border-radius:12px;font-weight:600;'>{azione_bt}</div>",
+            unsafe_allow_html=True,
+        )
 
-@st.cache_data
-def _build_final_policy(qtable_bytes):
-    non_zero = np.argwhere(qtable_bytes != 0)
-    stati = sorted(set(int(s) for s, _ in non_zero))
-    rows = []
-    for idx in stati:
-        bins = _decodifica_stato(idx)
-        row = {"Stato": idx}
-        for i, nome in enumerate(NOMI_PARAM):
-            row[nome] = _label_bin(i, bins[i])
-        az = AZIONI[int(np.argmax(qtable_bytes[idx]))]
-        row["Azione"] = az
-        row["Q-value"] = round(float(np.max(qtable_bytes[idx])), 2)
-        rows.append(row)
-    return pd.DataFrame(rows).set_index("Stato")
+    st.divider()
 
+    # ── Storico azioni ──
 
-# ── Load once ──
-
-history = _load_history()
-patients = _load_patients()
-
-agent = QLearningAgent()
-qtable_ok = agent.carica_q_table()
-qtable_bytes = agent.q_table.copy() if qtable_ok else None
-
-# ===========================================================================
-# PAGE
-# ===========================================================================
-
-st.title("Telemedicina – Agente RL")
-st.caption("Dati statici: aggiornati solo dopo un nuovo `python main.py --build-qt`.")
-
-st.divider()
-
-# ===========================================================================
-# 1. STORICO Q-TABLE
-# ===========================================================================
-
-st.header("1. Storico Q-Table")
-
-if history is not None and history.ndim == 3:
-    n_snap = history.shape[0]
-    non_zero = set()
-    for i in range(n_snap):
-        for s, _ in np.argwhere(history[i] != 0):
-            non_zero.add(int(s))
-    stati = sorted(non_zero)
-
-    if not stati:
-        st.info("Nessuno stato con valori non-zero.")
+    st.subheader("📜 Cronologia Azioni")
+    storico = dettaglio.get("storico", [])
+    if storico:
+        df_storico = pd.DataFrame([
+            {
+                "Ora": s["timestamp"],
+                "PA Sist": f"{s['parametri'].pressione_sistolica:.1f}",
+                "PA Dia": f"{s['parametri'].pressione_diastolica:.1f}",
+                "FC": f"{s['parametri'].frequenza_cardiaca:.1f}",
+                "Temp": f"{s['parametri'].temperatura:.1f}",
+                "SpO2": f"{s['parametri'].saturazione_ossigeno:.1f}",
+                "Glicemia": f"{s['parametri'].glicemia:.1f}",
+                "Rischio": s["livello_rischio"].capitalize(),
+                "Azione": s["azione"],
+            }
+            for s in reversed(storico)
+        ])
+        st.dataframe(df_storico, use_container_width=True, hide_index=True)
     else:
-        stato_info = {}
-        for s in stati:
-            bins = _decodifica_stato(s)
-            stato_info[s] = [_label_bin(i, bins[i]) for i in range(6)]
+        st.info("Nessuna cronologia disponibile.")
 
-        milestones = [
-            f"{int((i + 1) * 100 // n_snap)}%" for i in range(n_snap)
-        ]
+    st.divider()
 
-        tabs = st.tabs(AZIONI)
-        for a_idx, tab in enumerate(tabs):
-            with tab:
-                cols = NOMI_PARAM + milestones
-                data = {}
-                for pi, nome in enumerate(NOMI_PARAM):
-                    data[nome] = [stato_info[s][pi] for s in stati]
-                for i, m in enumerate(milestones):
-                    vals = [history[i][s][a_idx] for s in stati]
-                    if i == 0:
-                        data[m] = [f"{v:.2f}" for v in vals]
-                    else:
-                        prev = [history[i - 1][s][a_idx] for s in stati]
-                        data[m] = [
-                            f"{v:.2f} \u2191" if v - p > 0.001
-                            else f"{v:.2f} \u2193" if p - v > 0.001
-                            else f"{v:.2f} ="
-                            for v, p in zip(vals, prev)
-                        ]
-                df = pd.DataFrame(data, index=stati)
-                df.index.name = "Stato"
-                styled = df.style.map(_colore_qtext, subset=milestones)
-                st.dataframe(styled, width="stretch")
-else:
-    st.info("Nessuna history. Esegui `python main.py --build-qt`.")
+    # ── Grafico trend ──
 
-st.divider()
+    st.subheader("📈 Trend Parametri")
+    if storico:
+        df_trend = pd.DataFrame([
+            {
+                "Ora": s["timestamp"],
+                "Pressione Sistolica": s["parametri"].pressione_sistolica,
+                "Pressione Diastolica": s["parametri"].pressione_diastolica,
+                "Frequenza Cardiaca": s["parametri"].frequenza_cardiaca,
+                "Temperatura": s["parametri"].temperatura,
+                "SpO2": s["parametri"].saturazione_ossigeno,
+                "Glicemia": s["parametri"].glicemia,
+            }
+            for s in storico
+        ])
+        df_trend["Ora"] = pd.to_datetime(df_trend["Ora"])
+        df_trend = df_trend.set_index("Ora")
 
-# ===========================================================================
-# 2. PAZIENTI
-# ===========================================================================
-
-st.header("2. Pazienti")
-
-if patients:
-    df_pat = pd.DataFrame(
-        patients,
-        columns=[
-            "id", "paziente_id", "nome_paziente",
-            "pressione_sistolica", "pressione_diastolica",
-            "frequenza_cardiaca", "temperatura", "saturazione_ossigeno",
-            "glicemia", "timestamp", "livello_rischio",
-            "raccomandazioni", "allerta_medico",
-        ],
-    ).drop(columns=["id"])
-    df_pat["allerta_medico"] = df_pat["allerta_medico"].astype(bool)
-    st.dataframe(
-        df_pat.style.map(_colore_rischio, subset=["livello_rischio"]),
-        width="stretch",
-    )
-else:
-    st.info("Nessun paziente registrato.")
-
-st.divider()
-
-# ===========================================================================
-# 3. POLICY FINALE
-# ===========================================================================
-
-st.header("3. Policy Finale")
-
-if qtable_ok and qtable_bytes is not None:
-    st.dataframe(_build_final_policy(qtable_bytes), width="stretch")
-
-    st.subheader("Safety Override")
-    st.markdown(
-        """
-- PA >= 180 / PA dia >= 110  ->  alto
-- PA < 90 e FC > 100  ->  alto (shock)
-- FC >= 130 o <= 45  ->  alto
-- SpO2 < 88  ->  alto
-- T >= 39.5  ->  alto
-- Glicemia <= 55 o >= 250  ->  alto
-"""
-    )
-else:
-    st.warning("Nessuna policy. Esegui `python main.py --build-qt`.")
+        trend_sel = st.multiselect(
+            "Seleziona parametri da mostrare",
+            options=df_trend.columns.tolist(),
+            default=["Pressione Sistolica", "Frequenza Cardiaca", "SpO2"],
+        )
+        if trend_sel:
+            st.line_chart(df_trend[trend_sel])
+        else:
+            st.info("Seleziona almeno un parametro per visualizzare il trend.")
+    else:
+        st.info("Dati insufficienti per il grafico.")
