@@ -1,5 +1,5 @@
 """
-utils/notifications.py - Sistema di Notifiche
+telemedicina/utils/notifications.py - Sistema di Notifiche
 
 Questo modulo gestisce l'invio di notifiche a pazienti e medici.
 In questa implementazione, le notifiche sono simulate con:
@@ -18,7 +18,8 @@ Architettura modulare permette facile estensione senza modificare altri componen
 
 from datetime import datetime
 from typing import Optional
-from models.vital_parameters import VitalParameters
+from telemedicina.models.vital_parameters import VitalParameters
+from telemedicina import config
 import os
 
 

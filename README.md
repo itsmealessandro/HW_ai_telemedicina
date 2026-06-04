@@ -24,22 +24,37 @@ Sistema completo per il monitoraggio remoto dei parametri vitali con analisi int
 cd progetto_telemedicina
 
 # 2. Verifica struttura file
-progetto_telemedicina/
-├── main.py
-├── documentazione.md
-├── README.md
-├── models/
-│   ├── __init__.py
-│   └── vital_parameters.py
-├── agents/
-│   ├── __init__.py
-│   └── intelligent_agent.py
-├── database/
-│   ├── __init__.py
-│   └── db_manager.py
-└── utils/
-    ├── __init__.py
-    └── notifications.py
+ progetto_telemedicina/
+ ├── main.py
+ ├── documentazione.md
+ ├── README.md
+ ├── requirements.txt
+ ├── src/
+ │   └── telemedicina/
+ │       ├── __init__.py
+ │       ├── config.py
+ │       ├── cli.py
+ │       ├── models/
+ │       │   ├── __init__.py
+ │       │   └── vital_parameters.py
+ │       ├── agents/
+ │       │   ├── __init__.py
+ │       │   └── intelligent_agent.py
+ │       ├── database/
+ │       │   ├── __init__.py
+ │       │   └── db_manager.py
+ │       ├── services/
+ │       │   ├── __init__.py
+ │       │   └── analysis_service.py
+ │       └── utils/
+ │           ├── __init__.py
+ │           └── notifications.py
+ ├── data/
+ │   ├── telemedicina.db
+ │   └── logs/
+ └── tests/
+     ├── __init__.py
+     └── test_examples.py
 
 # 3. Esegui il sistema
 python main.py

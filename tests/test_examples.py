@@ -4,7 +4,7 @@ test_examples.py - Script per Testing Automatico Sistema
 Questo file contiene test automatici per validare il corretto funzionamento
 di tutti i componenti del sistema di telemedicina.
 
-Eseguire con: python test_examples.py
+Eseguire con: python -m tests.test_examples
 
 Test coperti:
 1. Validazione parametri vitali
@@ -17,12 +17,15 @@ Test coperti:
 Non richiede librerie esterne (no pytest necessario).
 """
 
-from models.vital_parameters import VitalParameters
-from agents.intelligent_agent import IntelligentAgent
-from database.db_manager import DatabaseManager
-from utils.notifications import NotificationSystem
-import os
 import sys
+import os
+
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
+
+from telemedicina.models.vital_parameters import VitalParameters
+from telemedicina.agents.intelligent_agent import IntelligentAgent
+from telemedicina.database.db_manager import DatabaseManager
+from telemedicina.utils.notifications import NotificationSystem
 
 
 class TestRunner:

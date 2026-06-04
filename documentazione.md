@@ -45,7 +45,14 @@ Il sistema di telemedicina è progettato per monitorare parametri vitali dei paz
 ```
 ┌─────────────────────────────────────────────┐
 │         INTERFACCIA UTENTE (CLI)            │
-│              (main.py)                      │
+│              (main.py / cli.py)             │
+└─────────────────────────────────────────────┘
+                    ↓
+┌─────────────────────────────────────────────┐
+│         SERVIZI APPLICATIVI                 │
+├─────────────────────────────────────────────┤
+│  • AnalysisService (orchestrazione)         │
+│  • Config (impostazioni centralizzate)      │
 └─────────────────────────────────────────────┘
                     ↓
 ┌─────────────────────────────────────────────┐
@@ -87,11 +94,14 @@ Il sistema di telemedicina è progettato per monitorare parametri vitali dei paz
 
 ## Componenti Principali
 
-### 1. main.py - Entry Point
+### 1. main.py e src/telemedicina/cli.py - Entry Point & CLI
 
-**Responsabilità:**
+**main.py (root):** Avvia il sistema aggiungendo `src/` al `sys.path` e chiama `telemedicina.cli.main()`.
+**cli.py:** Contiene l'interfaccia utente vera e propria, con menu e funzioni di interazione.
+
+**Responsabilita di cli.py:**
 - Gestione interfaccia utente CLI
-- Coordinamento tra tutti i moduli
+- Coordinamento tra tutti i moduli tramite `AnalysisService`
 - Menu interattivo per pazienti e medici
 - Gestione flusso applicativo
 
@@ -754,29 +764,46 @@ psql telemedicina < dump_converted.sql
 ```
 progetto_telemedicina/
 │
-├── main.py                    # Entry point
+├── main.py                    # Entry point (delega a cli.py)
 ├── documentazione.md          # Questo file
-├── telemedicina.db           # Database (creato automaticamente)
+├── README.md
+├── requirements.txt
 │
-├── models/
-│   ├── __init__.py
-│   └── vital_parameters.py   # Modello parametri
+├── src/
+│   └── telemedicina/
+│       ├── __init__.py
+│       ├── config.py          # Configurazione centralizzata
+│       ├── cli.py             # Interfaccia utente CLI
+│       │
+│       ├── models/
+│       │   ├── __init__.py
+│       │   └── vital_parameters.py   # Modello parametri vitali
+│       │
+│       ├── agents/
+│       │   ├── __init__.py
+│       │   └── intelligent_agent.py  # Agente intelligente (rule-based)
+│       │
+│       ├── database/
+│       │   ├── __init__.py
+│       │   └── db_manager.py         # Gestore database SQLite
+│       │
+│       ├── services/
+│       │   ├── __init__.py
+│       │   └── analysis_service.py   # Orchestrazione analisi
+│       │
+│       └── utils/
+│           ├── __init__.py
+│           └── notifications.py      # Sistema notifiche
 │
-├── agents/
-│   ├── __init__.py
-│   └── intelligent_agent.py  # Agente intelligente
+├── data/                     # Dati runtime (db, log)
+│   ├── telemedicina.db       # Database SQLite
+│   └── logs/
+│       ├── notifiche_pazienti.log
+│       └── alert_medici.log
 │
-├── database/
-│   ├── __init__.py
-│   └── db_manager.py         # Gestore database
-│
-├── utils/
-│   ├── __init__.py
-│   └── notifications.py      # Sistema notifiche
-│
-└── logs/                     # Creata automaticamente
-    ├── notifiche_pazienti.log
-    └── alert_medici.log
+└── tests/
+    ├── __init__.py
+    └── test_examples.py      # Test automatici
 ```
 
 ### Esecuzione

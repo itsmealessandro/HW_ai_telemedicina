@@ -1,5 +1,5 @@
 """
-agents/intelligent_agent.py - Agente Intelligente per Analisi Parametri
+telemedicina/agents/intelligent_agent.py - Agente Intelligente per Analisi Parametri
 
 Questo modulo implementa l'agente intelligente che analizza i parametri vitali
 e determina il livello di rischio del paziente.
@@ -17,7 +17,7 @@ Output dell'agente:
 - Flag per allerta medico
 """
 
-from models.vital_parameters import VitalParameters
+from telemedicina.models.vital_parameters import VitalParameters
 from typing import Dict, List
 
 

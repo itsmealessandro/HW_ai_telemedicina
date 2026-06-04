@@ -1,5 +1,5 @@
 """
-database/db_manager.py - Gestore Database SQLite
+telemedicina/database/db_manager.py - Gestore Database SQLite
 
 Questo modulo gestisce tutte le operazioni sul database SQLite.
 Responsabilità:
@@ -20,7 +20,8 @@ Per deployment production si consiglia PostgreSQL/MySQL.
 import sqlite3
 from datetime import datetime
 from typing import List, Dict, Optional
-from models.vital_parameters import VitalParameters
+from telemedicina.models.vital_parameters import VitalParameters
+from telemedicina import config
 import os
 
 
