@@ -1,1 +1,1 @@
-# Nessuna dipendenza esterna richiesta (solo standard library)
+numpy>=1.24

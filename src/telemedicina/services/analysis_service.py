@@ -15,10 +15,24 @@ from telemedicina import config
 class AnalysisService:
     """Servizio che orchestra l'analisi completa dei parametri vitali."""
 
-    def __init__(self, db_manager=None, agent=None, notif_system=None):
+    def __init__(self, db_manager=None, agent=None, notif_system=None, agente_tipo="rule"):
+        self.agente_tipo = agente_tipo
         self.db = db_manager or DatabaseManager(config.DB_PATH)
-        self.agent = agent or IntelligentAgent()
         self.notif = notif_system or NotificationSystem(log_dir=config.LOG_DIR)
+
+        if agente_tipo == "rl":
+            self._carica_agente_rl()
+        else:
+            self.agent = agent or IntelligentAgent()
+
+    def _carica_agente_rl(self):
+        from telemedicina.agents.rl_agent import QLearningAgent
+        self.agent = QLearningAgent()
+        if not self.agent.carica_q_table():
+            raise RuntimeError(
+                "Q-table non trovata. Esegui il training con --build."
+            )
+        print("Agente RL caricato.")
 
     def analizza_e_salva(self, paziente_id, nome_paziente, parametri):
         """Esegue analisi, salvataggio su DB e notifiche."""

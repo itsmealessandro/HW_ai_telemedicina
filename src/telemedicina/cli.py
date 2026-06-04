@@ -2,22 +2,27 @@
 cli.py - Interfaccia a riga di comando del sistema di telemedicina.
 """
 
+import sys
+import os
+import time
+import numpy as np
 from telemedicina.services.analysis_service import AnalysisService
 from telemedicina.models.vital_parameters import VitalParameters
-import sys
+from telemedicina.agents.rl_agent import QLearningAgent, AZIONI, N_BINS, SOGLIE
+from telemedicina import config
 
 
 def stampa_menu_principale():
-    print("\n" + "="*50)
+    print("\n" + "=" * 50)
     print("SISTEMA DI TELEMEDICINA - MONITORAGGIO VITALE")
-    print("="*50)
+    print("=" * 50)
     print("1. Inserisci nuovi parametri vitali (Paziente)")
     print("2. Visualizza storico parametri")
     print("3. Visualizza alert attivi")
     print("4. Area Medico - Visualizza pazienti critici")
     print("5. Statistiche sistema")
     print("0. Esci")
-    print("="*50)
+    print("=" * 50)
 
 
 def inserisci_parametri(service):
@@ -43,29 +48,29 @@ def inserisci_parametri(service):
             frequenza_cardiaca=frequenza_cardiaca,
             temperatura=temperatura,
             saturazione_ossigeno=saturazione_ossigeno,
-            glicemia=glicemia
+            glicemia=glicemia,
         )
 
         print("\nAnalisi parametri in corso...")
         analisi, interazione_id = service.analizza_e_salva(
             paziente_id=paziente_id,
             nome_paziente=nome,
-            parametri=parametri
+            parametri=parametri,
         )
 
-        print("\n" + "="*50)
+        print("\n" + "=" * 50)
         print("RISULTATI ANALISI")
-        print("="*50)
+        print("=" * 50)
         print(f"Livello di Rischio: {analisi['livello_rischio'].upper()}")
         print("\nParametri Anomali:")
-        if analisi['anomalie']:
-            for anomalia in analisi['anomalie']:
+        if analisi["anomalie"]:
+            for anomalia in analisi["anomalie"]:
                 print(f"  {anomalia}")
         else:
             print("  Tutti i parametri sono nella norma")
         print("\nRaccomandazioni:")
         print(f"  {analisi['raccomandazioni']}")
-        if analisi['allerta_medico']:
+        if analisi["allerta_medico"]:
             print("\nATTENZIONE: Il medico e stato allertato!")
         print(f"\nInterazione salvata con ID: {interazione_id}")
 
@@ -85,7 +90,7 @@ def visualizza_storico(service):
         return
 
     print(f"\nStorico per paziente: {storico[0][2]}")
-    print("="*80)
+    print("=" * 80)
     for row in storico:
         print(f"\nData: {row[8]}")
         print(f"Livello Rischio: {row[9]}")
@@ -95,7 +100,7 @@ def visualizza_storico(service):
         print(f"Saturazione O2: {row[7]}%")
         print(f"Glicemia: {row[11]} mg/dL")
         print(f"Raccomandazioni: {row[10]}")
-        print("-"*80)
+        print("-" * 80)
 
 
 def visualizza_alert(service):
@@ -114,7 +119,7 @@ def visualizza_alert(service):
         print(f"Allerta Medico: {'Si' if row[11] else 'No'}")
         print(f"Glicemia: {row[11]} mg/dL")
         print(f"Raccomandazioni: {row[10]}")
-        print("="*80)
+        print("=" * 80)
 
 
 def area_medico(service):
@@ -136,7 +141,7 @@ def area_medico(service):
             print(f"Paziente: {p[2]} (ID: {p[1]})")
             print(f"Ultima rilevazione: {p[8]}")
             print(f"Raccomandazioni: {p[10]}")
-            print("-"*80)
+            print("-" * 80)
     elif scelta == "2":
         visualizza_alert(service)
     elif scelta == "3":
@@ -155,9 +160,191 @@ def mostra_statistiche(service):
     print(f"Pazienti a Rischio Basso: {stats['rischio_basso']}")
 
 
-def main():
+def _decodifica_stato(idx):
+    bins = []
+    rest = idx
+    for i in range(5, -1, -1):
+        div = 1
+        for j in range(i):
+            div *= N_BINS[j]
+        b = rest // div
+        rest %= div
+        bins.append(b)
+    bins.reverse()
+    return bins
+
+
+def _label_bin(i, j):
+    s = SOGLIE[i]
+    if j == 0:
+        return f"<{s[0]}"
+    elif j == N_BINS[i] - 1:
+        return f">={s[N_BINS[i]-2]}"
+    else:
+        return f"{s[j-1]}-{s[j]-1}"
+
+
+def mostra_riepilogo_rl(agent):
+    NOMI_PARAM = ["PA sis", "PA dia", "FC", "Temp", "SpO2", "Glic"]
+
+    print("\n" + "=" * 60)
+    print("=== RIEPILOGO AGENTE RL ===")
+    print("=" * 60)
+
+    print("\nSafety override (soglie critiche):")
+    print("  PA >= 180 o PA dia >= 110     -> alto (crisi ipertensiva)")
+    print("  PA sis < 90 e FC > 100         -> alto (shock)")
+    print("  FC >= 130 o FC <= 45           -> alto")
+    print("  SpO2 < 88                      -> alto (ipossia severa)")
+    print("  Temperatura >= 39.5            -> alto (ipertermia critica)")
+    print("  Glicemia <= 55 o >= 250        -> alto")
+
+    non_zero = np.argwhere(agent.q_table != 0)
+    stati_visti = set(s for s, _ in non_zero)
+    totale_stati = N_BINS[0] * N_BINS[1] * N_BINS[2] * N_BINS[3] * N_BINS[4] * N_BINS[5]
+
+    print(
+        f"\nPolicy appresa (Q-table -- {len(stati_visti)} stati con valore non-zero):"
+    )
+    print(
+        f"  {'Stato':>6} | {'PA sis':>6} | {'PA dia':>6} | {'FC':>5} | {'Temp':>6} | {'SpO2':>4} | {'Glic':>7} | Azione"
+    )
+    print(
+        f"  {'-'*6}-+-{'-'*6}-+-{'-'*6}-+-{'-'*5}-+-{'-'*6}-+-{'-'*4}-+-{'-'*7}-+----------------"
+    )
+
+    for idx in sorted(stati_visti):
+        bins = _decodifica_stato(idx)
+        azione = AZIONI[int(np.argmax(agent.q_table[idx]))]
+        desc = " | ".join(_label_bin(i, bins[i]) for i in range(6))
+        print(f"  {idx:>6d} | {desc} | {azione}")
+
+    non_appresi = totale_stati - len(stati_visti)
+    print(f"\nDefault per i {non_appresi} stati non appresi: monitoring")
+    print("=" * 60 + "\n")
+
+
+def _mostra_qtable_snapshot(qtable, qtable_prev, label):
+    GRN = "\033[92m"
+    RED = "\033[91m"
+    BOLD = "\033[1m"
+    RST = "\033[0m"
+    AZN = ["monitoring", "contatta_m", "pronto_s", "emergenza"]
+    COL = 10
+
+    non_zero = np.argwhere(qtable != 0)
+    stati = sorted(set(int(s) for s, _ in non_zero))
+    if not stati:
+        return
+
+    print(f"\n  {BOLD}Q-table {label}{RST}")
+    hdr = f"  {'Stato':>6} | "
+    hdr += " | ".join(f"{a:>{COL}}" for a in AZN)
+    print(hdr)
+    print(f"  {'-'*6}-+-{'-'*COL}-+-{'-'*COL}-+-{'-'*COL}-+-{'-'*COL}")
+
+    for idx in stati:
+        vals = qtable[idx]
+        if qtable_prev is not None and idx < qtable_prev.shape[0]:
+            pv = qtable_prev[idx]
+            cells = []
+            for v, prev in zip(vals, pv):
+                s = f"{v:>{COL}.2f}"
+                if v > prev:
+                    cells.append(f"{GRN}{s}{RST}")
+                elif v < prev:
+                    cells.append(f"{RED}{s}{RST}")
+                else:
+                    cells.append(s)
+        else:
+            cells = [f"{v:>{COL}.2f}" for v in vals]
+        print(f"  {idx:>6d} | {' | '.join(cells)}")
+
+
+def addestra_rl():
+    from telemedicina.agents.rl_environment import SimPatientEnv
+
+    start = time.perf_counter()
+
+    print("=" * 60)
+    print("ADDESTRAMENTO AGENTE RL (Q-LEARNING)")
+    print("=" * 60)
+
+    agent = QLearningAgent()
+    env = SimPatientEnv()
+    step = max(1, config.RL_EPISODI // 10)
+
+    print(f"\nParametri:")
+    print(f"  Episodi: {config.RL_EPISODI}")
+    print(f"  Alpha: {agent.alpha}  |  Gamma: {agent.gamma}")
+    print(f"  Epsilon init: {agent.epsilon}  |  Decay: {agent.epsilon_decay}")
+    print(
+        f"\n{'Episodio':>8} | {'Reward medio':>12} | {'Epsilon':>7} | {'Q-table size':>11}"
+    )
+    print("-" * 50)
+
+    rewards = []
+    qtable_prev = None
+    for ep in range(1, config.RL_EPISODI + 1):
+        severita = env.reset()
+        parametri = env.parametri
+        reward_ep = 0
+        for _ in range(3):
+            stato = agent.discretizza(parametri)
+            azione = agent.scegli_azione(stato, training=True)
+            reward, nuova_severita, done = env.step(azione)
+            parametri = env.parametri
+            stato_next = agent.discretizza(parametri)
+            agent.impara(stato, azione, reward, stato_next, done)
+            reward_ep += reward
+            if done:
+                break
+        agent.decadi_epsilon()
+        rewards.append(reward_ep)
+        if ep % step == 0:
+            media = np.mean(rewards[-step:])
+            non_zero = int(np.count_nonzero(agent.q_table))
+            print(f"{ep:>8} | {media:>+12.2f} | {agent.epsilon:>6.3f} | {non_zero:>8}")
+
+            label = f"dopo {ep} episodi"
+            if qtable_prev is not None:
+                label += f" (Δ da {ep - step})"
+            _mostra_qtable_snapshot(agent.q_table, qtable_prev, label)
+            qtable_prev = agent.q_table.copy()
+
+    elapsed = time.perf_counter() - start
+    media_finale = np.mean(rewards[-step:])
+    print("-" * 50)
+    print(f"\nTraining completato in {elapsed:.1f}s!")
+    print(f"Reward media finale: {media_finale:+.2f}")
+    agent.salva_q_table()
+    print(f"Q-table salvata in: {config.RL_QTABLE_PATH}")
+
+    return agent
+
+
+def main(modo_rl=False, build_qt=False):
+    if build_qt:
+        agent = addestra_rl()
+        mostra_riepilogo_rl(agent)
+        print("Q-table pronta. Avvia con: python main.py -RL")
+        return
+
     print("Inizializzazione Sistema di Telemedicina...")
-    service = AnalysisService()
+
+    if modo_rl:
+        print("Modalita: RL (Q-learning)")
+        if not os.path.exists(config.RL_QTABLE_PATH):
+            print("Q-table non trovata. Avvio training automatico...")
+            addestra_rl()
+        agent = QLearningAgent()
+        agent.carica_q_table()
+        mostra_riepilogo_rl(agent)
+        service = AnalysisService(agente_tipo="rl")
+    else:
+        print("Modalita: Rule-based")
+        service = AnalysisService(agente_tipo="rule")
+
     print("Sistema pronto!\n")
 
     while True:

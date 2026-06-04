@@ -44,7 +44,39 @@ L'agente valuta i parametri in sequenza:
 | Ipertermia critica | T >= 39.5 | ALTO |
 | Ipossia severa | SpO2 < 88 | ALTO |
 
-### 2.4 Perche un Sistema a Regole?
+### 2.4 Agente RL (Q-learning) — Estensione Opzionale
+
+L'agente RL (`agents/rl_agent.py`) implementa **Q-learning tabulare** con discretizzazione dello stato (1296 stati = 4×4×3×3×3×3 bins).
+
+#### Architettura
+
+- **Stato**: 6 parametri vitali discretizzati in bins (es. PA sistolica: <90, 90-140, 140-180, >180)
+- **Azioni**: `monitoring`, `contatta_medico`, `pronto_soccorso`, `emergenza`
+- **Reward**: matrice 4×4 (severita × azione), ricompensa positiva per azione appropriata, negativa altrimenti
+- **Policy**: epsilon-greedy con decadimento (epsilon: 1.0 → 0.05)
+
+#### Training
+
+```bash
+# Menu opzione 7, oppure:
+python training/train_rl_agent.py
+```
+
+500 episodi con ambiente simulato. La Q-table viene salvata in `data/models/q_table.pkl`.
+
+#### Safety Override
+
+Prima di consultare la Q-table, l'agente applica soglie critiche hardcoded (PA≥180/110, FC≥130, SpO2<88, T≥39.5, glicemia≤55 o ≥250, pattern shock). Se attivate, la risposta e 'alto' con allerta medico, bypassando la policy appresa. Questo garantisce che casi estremi fuori dal range di training non vengano mai sottovalutati.
+
+#### Perche RL?
+
+- **Apprendimento autonomo**: la policy migliora con l'esperienza (reward medio: -4.98 → +19.46)
+- **Esplorazione**: scopre strategie non codificate esplicitamente
+- **Complementare al rule-based**: puo gestire scenari sfumati tra le soglie fisse
+
+---
+
+### 2.5 Perche un Sistema a Regole (come primario)?
 
 - **Interpretabilita totale**: ogni decisione e spiegabile e tracciabile
 - **Nessun dato di training**: funziona immediatamente con conoscenza medica codificata
@@ -130,12 +162,14 @@ CREATE TABLE interazioni (
 ### Requisiti
 
 - Python 3.8+
-- Nessuna libreria esterna (solo standard library)
+- `numpy>=1.24` (richiesto sempre, anche per rule-based)
 
 ### Esecuzione
 
 ```bash
-python main.py
+python main.py                # Rule-based
+python main.py -RL            # RL, auto-training se Q-table assente
+python main.py -RL --build    # RL, forza retrain della Q-table
 ```
 
 Menu disponibile:
@@ -144,6 +178,7 @@ Menu disponibile:
 - `3`: Alert critici attivi
 - `4`: Area medico (pazienti critici)
 - `5`: Statistiche sistema
+- `0`: Esci
 
 ### Test
 
@@ -164,7 +199,9 @@ progetto_telemedicina/
     config.py                       # Path centralizzati
     cli.py                          # Interfaccia CLI
     models/vital_parameters.py      # Modello parametri vitali
-    agents/intelligent_agent.py     # Agente intelligente (rule-based)
+    agents/intelligent_agent.py     # Agente intelligente (rule-based, primario)
+    agents/rl_agent.py              # Agente RL Q-learning (opzionale)
+    agents/rl_environment.py        # Ambiente simulato per training RL
     database/db_manager.py          # Gestione database SQLite
     services/analysis_service.py    # Orchestrazione servizi
     utils/notifications.py          # Sistema notifiche
