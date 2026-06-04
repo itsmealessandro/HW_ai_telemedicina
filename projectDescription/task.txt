@@ -1,0 +1,8 @@
+1. Design and implement an intelligent agent in the context of telemedicine. Specifically, the
+program will have to manage a series of vital parameters and return a response message to
+the patient, as well as inform the doctor in the event of significantly unbalanced parameter
+values. Keep track of the various interactions that have taken place using a database.
+
+
+In order to take the exam, submit all documentation produced, which must contain a detailed
+description of all steps taken with the relevant reasons, as well as all sources of the code
