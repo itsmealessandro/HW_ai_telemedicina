@@ -1,232 +1,60 @@
-# Sistema di Telemedicina con Agente Intelligente 🏥
+# Telemedicina – Intelligent Agent
 
-Sistema completo per il monitoraggio remoto dei parametri vitali con analisi intelligente e notifiche automatiche.
+Sistema di telemedicina con agente intelligente per monitoraggio parametri vitali, risposta al paziente, allerta medico e storico su database.
 
-## 🎯 Caratteristiche Principali
+## Task Requirements
 
-- ✅ **Monitoraggio Parametri Vitali**: Pressione, frequenza cardiaca, temperatura, saturazione ossigeno, glicemia
-- 🤖 **Agente Intelligente**: Analisi automatica con valutazione rischio (BASSO/MEDIO/ALTO)
-- 📊 **Database SQLite**: Storico completo di tutte le interazioni
-- 🔔 **Sistema Notifiche**: Alert automatici a paziente e medico
-- 📈 **Statistiche**: Dashboard con metriche aggregate
-- 👨‍⚕️ **Area Medico**: Visualizzazione pazienti critici
+| # | Requirement | Implementation |
+|---|-------------|----------------|
+| 1 | Intelligent agent for telemedicine | Rule-based expert system (symbolic AI) in `agents/intelligent_agent.py` |
+| 2 | Manage vital parameters | 6 parameters: blood pressure, heart rate, temperature, SpO2, blood glucose – validated and classified by severity |
+| 3 | Return response message to patient | Risk level (low/medium/high) + personalised text recommendations shown on CLI |
+| 4 | Inform doctor on unbalanced values | Automatic alert when risk = high or critical patterns detected (shock, hypertensive crisis, sepsis, etc.) |
+| 5 | Track interactions on database | SQLite (`database/db_manager.py`): full history per patient, alert list, aggregate statistics |
+| 6 | Submit documentation | This file + `documentazione.md` with detailed descriptions, rationale, and code sources |
 
-## 🚀 Quick Start
+## AI Approach – Rule-Based Expert System
 
-### Requisiti
-- Python 3.8+
-- Nessuna libreria esterna richiesta (solo standard library)
+The intelligent agent uses **symbolic AI** (a rule-based expert system) rather than machine learning:
 
-### Installazione
+- **Knowledge base**: medical reference ranges, severity thresholds, pathological correlation rules encoded as Python dictionaries and conditionals.
+- **Inference engine**: sequential rule evaluation – validates input, identifies single-parameter anomalies, checks multi-parameter patterns (e.g. hypotension + tachycardia → possible shock), then computes risk via a heuristic decision tree.
+- **No training data required**: the agent works immediately because medical knowledge is explicitly coded.
+- **Fully interpretable**: every decision can be traced back to a specific rule – important for medical accountability.
 
-```bash
-# 1. Scarica/clona il progetto
-cd progetto_telemedicina
+## Project Structure
 
-# 2. Verifica struttura file
- progetto_telemedicina/
- ├── main.py
- ├── documentazione.md
- ├── README.md
- ├── requirements.txt
- ├── src/
- │   └── telemedicina/
- │       ├── __init__.py
- │       ├── config.py
- │       ├── cli.py
- │       ├── models/
- │       │   ├── __init__.py
- │       │   └── vital_parameters.py
- │       ├── agents/
- │       │   ├── __init__.py
- │       │   └── intelligent_agent.py
- │       ├── database/
- │       │   ├── __init__.py
- │       │   └── db_manager.py
- │       ├── services/
- │       │   ├── __init__.py
- │       │   └── analysis_service.py
- │       └── utils/
- │           ├── __init__.py
- │           └── notifications.py
- ├── data/
- │   ├── telemedicina.db
- │   └── logs/
- └── tests/
-     ├── __init__.py
-     └── test_examples.py
+```
+main.py                        # entry point, delegates to src/telemedicina/cli.py
+src/telemedicina/
+  config.py                     # paths for db and logs (absolute via pathlib)
+  cli.py                        # CLI interface (menu, input, output)
+  models/vital_parameters.py    # dataclass + validation + anomaly detection
+  agents/intelligent_agent.py   # rule-based expert system (the AI agent)
+  database/db_manager.py        # SQLite CRUD operations
+  services/analysis_service.py  # orchestrates agent → db → notifications
+  utils/notifications.py        # patient/doctor notification logging
+data/                           # runtime: telemedicina.db + logs/ (gitignored)
+tests/test_examples.py          # 14 tests covering all components
+documentazione.md               # full project documentation
+```
 
-# 3. Esegui il sistema
+## Quick Start
+
+```
 python main.py
 ```
 
-### Primo Utilizzo
+Follow the menu: insert patient data and vital parameters, get risk analysis, view history and alerts.
 
-1. **Seleziona opzione 1** - Inserisci nuovi parametri vitali
-2. **Inserisci ID paziente**: es. `P001`
-3. **Inserisci nome**: es. `Mario Rossi`
-4. **Inserisci parametri vitali** (valori esempio normali):
-   - Pressione Sistolica: `120`
-   - Pressione Diastolica: `80`
-   - Frequenza Cardiaca: `75`
-   - Temperatura: `36.8`
-   - Saturazione Ossigeno: `98`
-   - Glicemia: `95`
+## Testing
 
-5. **Ricevi analisi immediata** con:
-   - Livello di rischio
-   - Anomalie rilevate
-   - Raccomandazioni personalizzate
-
-## 📖 Documentazione Completa
-
-Per una comprensione approfondita del sistema, consulta **`documentazione.md`** che include:
-
-- Architettura dettagliata del sistema
-- Spiegazione di ogni componente
-- Rationale delle scelte tecniche
-- Flussi di funzionamento
-- Design pattern utilizzati
-- Estensioni future (API REST, ML, App Mobile)
-- Compliance GDPR e certificazioni mediche
-
-## 🎨 Struttura del Codice
-
-### main.py
-Entry point del sistema con interfaccia CLI. Gestisce menu interattivo e coordina tutti i componenti.
-
-### models/vital_parameters.py
-Definisce il modello dati per i parametri vitali con:
-- Range di normalità basati su linee guida mediche
-- Validazione a due livelli (fisiologica + clinica)
-- Identificazione automatica anomalie con gravità
-
-### agents/intelligent_agent.py
-Agente intelligente basato su regole che:
-- Analizza parametri individuali
-- Identifica correlazioni patologiche (shock, crisi ipertensiva, sepsi)
-- Calcola rischio globale
-- Genera raccomandazioni personalizzate
-- Decide quando allertare il medico
-
-### database/db_manager.py
-Gestore database SQLite con:
-- Schema ottimizzato con indici
-- Query per storico, alert, statistiche
-- Supporto per trend analysis
-
-### utils/notifications.py
-Sistema notifiche che gestisce:
-- Notifiche paziente (raccomandazioni)
-- Alert medico (emergenze)
-- Log tracciabilità completa
-
-## 🔍 Esempi di Utilizzo
-
-### Parametri Normali
 ```
-Input: 120/80 mmHg, 75 bpm, 36.8°C, 98%, 95 mg/dL
-Output: 
-  ✅ Rischio BASSO
-  ✅ Tutti i parametri nella norma
-  ✅ Continuare monitoraggio regolare
+python -m tests.test_examples
 ```
 
-### Parametri Critici
-```
-Input: 190/115 mmHg, 125 bpm, 36.8°C, 98%, 95 mg/dL
-Output:
-  🚨 Rischio ALTO
-  ⚠️ CRISI IPERTENSIVA rilevata
-  🚨 Medico ALLERTATO automaticamente
-  ⚠️ Recarsi immediatamente al pronto soccorso
-```
-
-## 🧪 Testing
-
-Il sistema include logica di validazione robusta:
-- Validazione input (range fisiologici)
-- Gestione errori con messaggi chiari
-- Log completo per debugging
-- Pattern di test inclusi in documentazione
-
-## 🔐 Sicurezza e Privacy
-
-- Database locale (no cloud di default)
-- Log separati per paziente/medico
-- Struttura pronta per crittografia
-- Compliance GDPR (vedi documentazione)
-
-## 🛣️ Roadmap
-
-### ✅ Fase 1 - MVP (Completata)
-- Sistema CLI funzionale
-- Agente intelligente con regole
-- Database SQLite con storico
-- Notifiche simulate
-
-### 🚧 Fase 2 - Production (In pianificazione)
-- API REST per integrazione web/mobile
-- Autenticazione e autorizzazione
-- Notifiche email/SMS reali
-- Deploy cloud (AWS/Azure)
-
-### 📅 Fase 3 - Enterprise
-- Dashboard web React
-- App mobile nativa
-- Machine Learning per predizione rischio
-- Integrazione wearables IoT
-
-## 📚 Risorse
-
-### Linee Guida Mediche
-- American Heart Association - Pressione arteriosa
-- European Society of Cardiology - Frequenza cardiaca
-- WHO - Temperatura corporea
-- American Diabetes Association - Glicemia
-
-### Standard Tecnici
-- HL7 FHIR per interoperabilità healthcare
-- ISO 13485 per dispositivi medici
-- GDPR per protezione dati
-
-## ❓ FAQ
-
-**Q: Posso usare questo sistema in produzione?**
-A: Questo è un prototipo educativo. Per produzione serve: certificazione medical device, compliance regolamentare, infrastruttura cloud enterprise.
-
-**Q: Come aggiungo nuovi parametri vitali?**
-A: Modifica `VitalParameters` in `models/vital_parameters.py`, aggiungi regole in `IntelligentAgent`, aggiorna schema database.
-
-**Q: Supporta più medici/pazienti?**
-A: Sì, il database supporta N pazienti. Per multi-medico serve aggiungere autenticazione e ruoli.
-
-**Q: Posso integrare con dispositivi IoT?**
-A: Struttura modulare facilita integrazione. Vedi sezione "Integrazione Dispositivi IoT" in documentazione.md.
-
-## 🤝 Contributi
-
-Questo è un progetto didattico. Per miglioramenti:
-1. Studia documentazione.md per comprendere architettura
-2. Segui pattern esistenti per coerenza
-3. Documenta ogni modifica
-4. Testa approfonditamente
-
-## 📄 Licenza
-
-[Inserire licenza appropriata - es. MIT, Apache 2.0]
-
-## 👥 Autori
-
-Sistema di Telemedicina - Progetto Universitario
-[Inserire nomi autori/team]
-
-## 📞 Supporto
-
-- 🐛 Bug/Issue: [GitHub Issues]
-- 💬 Domande: [Email supporto]
-- 📖 Docs: documentazione.md
+14 tests – all pass.
 
 ---
 
-**⚠️ DISCLAIMER MEDICO**: Questo sistema è un prototipo educativo. NON sostituisce consulto medico professionale. Per emergenze mediche chiamare il 118.
+*Prototype for educational purposes. Does not substitute professional medical advice.*
