@@ -284,6 +284,7 @@ def addestra_rl():
     print("-" * 50)
 
     rewards = []
+    qtable_snapshots = []
     qtable_prev = None
     for ep in range(1, config.RL_EPISODI + 1):
         severita = env.reset()
@@ -306,6 +307,8 @@ def addestra_rl():
             non_zero = int(np.count_nonzero(agent.q_table))
             print(f"{ep:>8} | {media:>+12.2f} | {agent.epsilon:>6.3f} | {non_zero:>8}")
 
+            qtable_snapshots.append(agent.q_table.copy())
+
             label = f"dopo {ep} episodi"
             if qtable_prev is not None:
                 label += f" (Δ da {ep - step})"
@@ -317,7 +320,12 @@ def addestra_rl():
     print("-" * 50)
     print(f"\nTraining completato in {elapsed:.1f}s!")
     print(f"Reward media finale: {media_finale:+.2f}")
+
+    np.save(config.RL_REWARDS_PATH, np.array(rewards))
+    np.save(config.RL_QTABLES_HISTORY_PATH, np.array(qtable_snapshots))
     agent.salva_q_table()
+    print(f"Reward salvate in: {config.RL_REWARDS_PATH}")
+    print(f"Q-table history salvata in: {config.RL_QTABLES_HISTORY_PATH}")
     print(f"Q-table salvata in: {config.RL_QTABLE_PATH}")
 
     return agent

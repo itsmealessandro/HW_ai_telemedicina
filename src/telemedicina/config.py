@@ -20,3 +20,5 @@ RL_EPSILON_INIT = 1.0
 RL_EPSILON_DECAY = 0.99996
 RL_EPSILON_MIN = 0.05
 RL_EPISODI = 100000
+RL_REWARDS_PATH = str(PROJECT_ROOT / "data" / "models" / "training_rewards.npy")
+RL_QTABLES_HISTORY_PATH = str(PROJECT_ROOT / "data" / "models" / "qtables_history.npy")
