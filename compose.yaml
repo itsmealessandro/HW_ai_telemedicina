@@ -13,7 +13,7 @@ services:
 
   monitor:
     build:
-      dockerfile: docker/monitor.Dockerfile
+      dockerfile: services/monitor/Dockerfile
       context: .
     ports:
       - "8001"
@@ -29,7 +29,7 @@ services:
 
   analyzer:
     build:
-      dockerfile: docker/analyzer.Dockerfile
+      dockerfile: services/analyzer/Dockerfile
       context: .
     ports:
       - "8010"
@@ -37,7 +37,7 @@ services:
       redis:
         condition: service_healthy
     volumes:
-      - ./data:/data
+      - ./data:/app/data
     networks:
       - mapek-net
     environment:
@@ -47,7 +47,7 @@ services:
 
   executor:
     build:
-      dockerfile: docker/executor.Dockerfile
+      dockerfile: services/executor/Dockerfile
       context: .
     ports:
       - "8020"
@@ -63,7 +63,7 @@ services:
 
   frontend:
     build:
-      dockerfile: docker/nginx.Dockerfile
+      dockerfile: services/frontend/Dockerfile
       context: .
     ports:
       - "80:80"

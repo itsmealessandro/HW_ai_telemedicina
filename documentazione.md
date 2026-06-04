@@ -44,44 +44,111 @@ L'agente valuta i parametri in sequenza:
 | Ipertermia critica | T >= 39.5 | ALTO |
 | Ipossia severa | SpO2 < 88 | ALTO |
 
-### 2.4 Agente RL (Q-learning) — Estensione Opzionale
+### 2.4 Agente RL (Q-learning) — Componente Centrale
 
-L'agente RL (`agents/rl_agent.py`) implementa **Q-learning tabulare** con discretizzazione dello stato (1296 stati = 4×4×3×3×3×3 bins).
+L'agente RL (`agents/rl_agent.py`) implementa **Q-learning tabulare** ed è il motore decisionale principale del sistema. La Q-table, addestrata offline, viene caricata dal servizio **analyzer** all'avvio e interrogata ogni 3 secondi per ogni paziente.
 
 #### Architettura
 
-- **Stato**: 6 parametri vitali discretizzati in bins (es. PA sistolica: <90, 90-140, 140-180, >180)
-- **Azioni**: `monitoring`, `contatta_medico`, `pronto_soccorso`, `emergenza`
-- **Reward**: matrice 4×4 (severita × azione), ricompensa positiva per azione appropriata, negativa altrimenti
-- **Policy**: epsilon-greedy con decadimento (epsilon: 1.0 → 0.05)
+| Componente | Descrizione |
+|-----------|-------------|
+| **Stato** | 1296 stati discreti (4×4×3×3×3×3 bins) |
+| **Azioni** | `monitoring`, `contatta_medico`, `pronto_soccorso`, `emergenza` |
+| **Q-table** | Matrice 1296×4 di valori float appresi via Q-learning |
+| **Policy** | Greedy (argmax) in esecuzione, epsilon-greedy in training |
+| **Learning rate** α | 0.1 |
+| **Discount factor** γ | 0.9 |
+| **Epsilon decay** | 1.0 → 0.05 (decay: 0.99996) |
+
+#### Discretizzazione dello Stato
+
+Ogni parametro vitale viene mappato in un bin discreto:
+
+| Parametro | Bins | Soglie |
+|-----------|------|--------|
+| PA Sistolica | 4 | <90, 90-140, 140-180, ≥180 |
+| PA Diastolica | 4 | <60, 60-90, 90-110, ≥110 |
+| Frequenza Cardiaca | 3 | <60, 60-100, ≥100 |
+| Temperatura | 3 | <36.0, 36.0-37.5, ≥37.5 |
+| SpO2 | 3 | <90, 90-95, ≥95 |
+| Glicemia | 3 | <70, 70-140, ≥140 |
+
+Il combinate di 6 bins produce un indice univoco da 0 a 1295 che identifica lo stato.
 
 #### Training
 
-```bash
-# Menu opzione 7, oppure:
-python training/train_rl_agent.py
-```
+La Q-table viene addestrata con 50000 episodi di esplorazione casuale che coprono l'intero range fisiologico dei parametri (PA 70-220, FC 35-180, T 34.5-41.5, SpO2 75-100, Glicemia 30-350). A ogni episodio:
 
-500 episodi con ambiente simulato. La Q-table viene salvata in `data/models/q_table.pkl`.
+1. Vengono generati parametri vitali casuali
+2. Viene calcolato un reward euristico basato su quanti parametri sono in range normale
+3. L'agente aggiorna la Q-table con la formula di Q-learning:
+   `Q(s,a) ← Q(s,a) + α · [r + γ · max Q(s',a') - Q(s,a)]`
+4. ε decade gradualmente per passare da esplorazione a sfruttamento
+
+Risultato: **1281/1296 stati coperti** con valori non-zero.
+
+```bash
+# Addestramento
+docker compose build analyzer  # include la Q-table pre-addestrata
+```
 
 #### Safety Override
 
-Prima di consultare la Q-table, l'agente applica soglie critiche hardcoded (PA≥180/110, FC≥130, SpO2<88, T≥39.5, glicemia≤55 o ≥250, pattern shock). Se attivate, la risposta e 'alto' con allerta medico, bypassando la policy appresa. Questo garantisce che casi estremi fuori dal range di training non vengano mai sottovalutati.
+Prima di consultare la Q-table, l'agente applica soglie critiche hardcoded. Se attivate, la risposta è 'alto' con allerta medico, bypassando la policy appresa:
 
-#### Perche RL?
+| Condizione | Override | Azione |
+|-----------|----------|--------|
+| PA ≥ 180 o PA dia ≥ 110 | crisi_ipertensiva | pronto_soccorso |
+| PA < 90 e FC > 100 | shock | emergenza |
+| FC ≥ 130 o ≤ 45 | frequenza_critica | pronto_soccorso |
+| SpO2 < 88 | ipossia_severa | emergenza |
+| T ≥ 39.5 | ipertermia_critica | pronto_soccorso |
+| Glicemia ≤ 55 o ≥ 250 | glicemia_critica | pronto_soccorso |
 
-- **Apprendimento autonomo**: la policy migliora con l'esperienza (reward medio: -4.98 → +19.46)
-- **Esplorazione**: scopre strategie non codificate esplicitamente
-- **Complementare al rule-based**: puo gestire scenari sfumati tra le soglie fisse
+Nel frontend, quando il safety override è attivo, l'azione corrispondente viene evidenziata e il suo Q-value artificialmente incrementato per mostrare visivamente che l'override ha priorità.
+
+#### Ruolo nel Ciclo MAPE-K
+
+| Fase | Ruolo dell'Agente RL |
+|------|---------------------|
+| **ANALYZE** | Discretizza i parametri in stato, interroga Q-table → 4 Q-values |
+| **PLAN** | Argmax sui Q-values (o safety override) → azione, rischio, raccomandazioni |
+| **KNOWLEDGE** | La Q-table è la base di conoscenza appresa (policy) |
 
 ---
+### 2.5 Ciclo MAPE-K (Autonomic Computing)
 
-### 2.5 Perche un Sistema a Regole (come primario)?
+L'intero sistema è modellato sul framework **MAPE-K** dell'autonomic computing, dove le fasi sono implementate da microservizi separati che comunicano via Redis.
 
-- **Interpretabilita totale**: ogni decisione e spiegabile e tracciabile
-- **Nessun dato di training**: funziona immediatamente con conoscenza medica codificata
-- **Deterministico**: stesso input produce sempre stesso output, requisito per dispositivi medici
-- **Manutenibile**: aggiungere o modificare regole e immediato e trasparente
+```
+┌─────────────────────────────────────────────────────────────┐
+│                     MAPE-K LOOP                               │
+│                                                               │
+│  MONITOR     ANALYZE       PLAN        EXECUTE                │
+│  ┌──────┐   ┌────────┐   ┌───────┐   ┌────────┐              │
+│  │Sensor │──▶│Q-table │──▶│Argmax │──▶│WS push │              │
+│  │simul. │   │lookup  │   │+safe  │   │+notify │              │
+│  └──────┘   └────────┘   └───────┘   └────────┘              │
+│                    │                                          │
+│                    ▼                                          │
+│              ┌─────────────┐                                  │
+│              │ KNOWLEDGE    │                                  │
+│              │ Q-table.pkl  │                                  │
+│              │ DB SQLite    │                                  │
+│              │ Safety Rules │                                  │
+│              └─────────────┘                                  │
+└─────────────────────────────────────────────────────────────┘
+```
+
+| Fase | Servizio | Componente AI |
+|------|----------|---------------|
+| **M**onitor | `monitor:8001` | — (solo simulazione sensori) |
+| **A**nalyze | `analyzer:8010` | Discretizzazione + Q-table lookup |
+| **P**lan | `analyzer:8010` | Argmax + Safety Override |
+| **E**xecute | `executor:8020` | — (solo coordinamento) |
+| **K**nowledge | Volume condiviso | Q-table, DB storico, regole di safety |
+
+Il ciclo viene eseguito ogni 3 secondi: il monitor simula i pazienti, l'analyzer li valuta con la Q-table, l'executor distribuisce i risultati via WebSocket.
 
 ---
 

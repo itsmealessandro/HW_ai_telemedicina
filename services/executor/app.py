@@ -7,7 +7,7 @@ from collections import deque
 import redis
 
 from telemedicina import config
-from telemedicina.executor.ws_manager import WSManager
+from ws_manager import WSManager
 
 MAX_STORICO = 30
 
