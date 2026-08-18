@@ -1,0 +1,21 @@
+# Byte-compiled / cache
+__pycache__/
+*.py[codz]
+*$py.class
+
+# Dati runtime
+data/
+
+# Artifact del modello
+*.pkl
+*.joblib
+*.h5
+*.hdf5
+*.keras
+*.pt
+*.pth
+*.onnx
+
+# Log
+logs/
+*.log

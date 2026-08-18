@@ -191,6 +191,9 @@ cython_debug/
 # Runtime data (database, logs)
 data/
 
+# OpenCode deepwork local progress
+.slim/deepwork/
+
 # Ruff stuff:
 .ruff_cache/
 
