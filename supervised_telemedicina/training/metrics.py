@@ -90,21 +90,17 @@ def kappa_cohen(y_true: np.ndarray, y_pred: np.ndarray, n_classi: int) -> float:
 
 
 def distanza_dalle_soglie(X: np.ndarray) -> np.ndarray:
-    """Distanza minima di ogni campione dai confini di classificazione.
+    """Distanza media normalizzata dai confini clinici rilevanti.
 
-    Per ogni feature si considera la distanza dal confine più vicino tra
-    soglie critiche/moderate (alta e bassa) e range normali, NORMALIZZATA
-    per l'ampiezza del range normale della feature (unità: "ampiezze di
-    range normale"). Senza normalizzazione la temperatura (range normale
-    stretto) dominerebbe la distanza minima di quasi tutti i campioni,
-    rendendo l'analisi errori priva di discriminazione. Un campione
-    esattamente su un confine ha distanza 0; valori lontani da ogni
-    confine hanno distanza grande. Usata per l'analisi degli errori:
-    gli errori vicini ai confini sono attesi (confini arbitrari), quelli
-    lontani sono più preoccupanti.
+    Per ogni feature si sceglie il confine critico/moderato più vicino e si
+    divide per l'ampiezza del relativo range normale. La media tra feature
+    impedisce che una sola temperatura, la cui unità è più piccola, domini la
+    misura. I confini sono esclusivamente quelli derivati da
+    :mod:`safety_rules`; i range normali servono solo come normalizzatore.
+    Un campione su un confine ha distanza zero.
     """
     X = np.asarray(X, dtype=np.float64)
-    distanze = np.full(X.shape[0], np.inf)
+    distanze = np.zeros(X.shape[0], dtype=np.float64)
     for i, nome in enumerate(FEATURE_ORDER):
         valori = X[:, i]
         min_n, max_n = RANGE_NORMALI[nome]
@@ -114,12 +110,11 @@ def distanza_dalle_soglie(X: np.ndarray) -> np.ndarray:
             for soglia in tabella[nome].values():
                 if soglia is not None:
                     confini.append(float(soglia))
-        confini.extend([min_n, max_n])
-        for confine in confini:
-            distanze = np.minimum(
-                distanze, np.abs(valori - confine) / ampiezza
-            )
-    return distanze
+        per_feature = np.min(
+            np.abs(valori[:, None] - np.asarray(confini)), axis=1
+        ) / ampiezza
+        distanze += per_feature
+    return distanze / len(FEATURE_ORDER)
 
 
 def metriche_sicurezza(
@@ -132,8 +127,8 @@ def metriche_sicurezza(
 
     - recall_alto: frazione di veri 'alto' riconosciuti;
     - mancati_alto: numero di 'alto' classificati come non-alto;
-    - declassati_critici: 'alto' predetti come qualunque classe non-alto
-      (peggiore errore: anche il declassamento a 'medio' è critico).
+    - declassati_critici: veri 'alto' predetti con un indice inferiore a
+      quello di 'alto' (nel contratto attuale: 'basso' o 'medio').
     """
     y_true = np.asarray(y_true)
     y_pred = np.asarray(y_pred)

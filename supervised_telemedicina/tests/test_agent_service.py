@@ -13,6 +13,7 @@ Nessun import dal legacy (archive/).
 """
 
 import unittest
+from pathlib import Path
 from typing import Dict
 
 from telemedicina_supervised.agents.supervised_agent import AgentOutcome, SupervisedAgent
@@ -61,7 +62,8 @@ class TestSupervisedAgent(unittest.TestCase):
     """Contratto del SupervisedAgent (baseline rule-based)."""
 
     def setUp(self):
-        self.agent = SupervisedAgent()
+        # Explicit absent artifact keeps this legacy fixture rule-based.
+        self.agent = SupervisedAgent(modello_path=Path("/missing/legacy-model.npz"))
 
     def test_output_è_un_agent_outcome(self):
         esito = self.agent.predict(vp())

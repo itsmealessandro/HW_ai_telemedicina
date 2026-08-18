@@ -136,7 +136,7 @@ def analisi_errori_per_distanza(
     y_test: np.ndarray,
     predizioni: np.ndarray,
 ) -> Dict[str, Any]:
-    """Errori raggruppati per distanza minima dalle soglie."""
+    """Errori raggruppati per distanza media normalizzata dai confini."""
     distanze = distanza_dalle_soglie(X_test)
     errori = y_test != predizioni
     if not errori.any():
@@ -185,7 +185,7 @@ def genera_test_no_buffer(seed_base: int, n_test: int) -> Tuple[np.ndarray, np.n
     return X, y
 
 
-def main() -> None:
+def main(argv: List[str] | None = None) -> None:
     parser = argparse.ArgumentParser(description="Training MLP telemedicina")
     parser.add_argument("--seed-base", type=int, default=SEED_DEFAULT)
     parser.add_argument(
@@ -198,7 +198,7 @@ def main() -> None:
         type=Path,
         default=Path("data/models"),
     )
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
 
     dati = carica_dataset(args.data_dir)
     preparati, scaler = prepara(dati)
@@ -227,7 +227,7 @@ def main() -> None:
     # 3) Valutazione UNA volta sul test congelato.
     predizioni = modello_finale.predici_indici(X_test)
     metriche = riepilogo_metriche(
-        y_test, predizioni, n_classi=len(CLASSI), indice_alto=2
+        y_test, predizioni, n_classi=len(CLASSI), indice_alto=CLASSI.index("alto")
     )
     # Le distanze dalle soglie vanno calcolate sui valori GREZZI (le soglie
     # di safety_rules sono in unità cliniche, non standardizzate).
@@ -242,7 +242,7 @@ def main() -> None:
     y_nb_idx = to_indici(y_nb, CLASSI)
     predizioni_nb = modello_finale.predici_indici(X_nb_norm)
     metriche_nb = riepilogo_metriche(
-        y_nb_idx, predizioni_nb, n_classi=len(CLASSI), indice_alto=2
+        y_nb_idx, predizioni_nb, n_classi=len(CLASSI), indice_alto=CLASSI.index("alto")
     )
 
     # 5) Report riproducibile.

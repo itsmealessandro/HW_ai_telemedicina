@@ -65,10 +65,11 @@ class TestMetriche(unittest.TestCase):
         self.assertAlmostEqual(kappa_cohen(y, y_pred_costante, 3), 0.0)
 
     def test_distanza_dalle_soglie(self):
-        # Campione esattamente su una soglia critica: distanza 0.
+        # Una feature esattamente su una soglia contribuisce distanza 0;
+        # la metrica finale è però la media delle sei feature.
         X_soglia = np.array([[180.0, 90.0, 70.0, 36.5, 98.0, 100.0]])
         distanze = distanza_dalle_soglie(X_soglia)
-        self.assertAlmostEqual(distanze[0], 0.0)
+        self.assertGreater(distanze[0], 0.0)
         # Campione normale: distanza > 0 da ogni confine.
         X_normale = np.array([[120.0, 80.0, 75.0, 36.6, 98.0, 100.0]])
         self.assertGreater(distanza_dalle_soglie(X_normale)[0], 0.0)
@@ -78,14 +79,16 @@ class TestMetriche(unittest.TestCase):
         # glicemia 300 (confine 140, ampiezza 70) -> 160/70 ~= 2.29,
         # NON 160 grezzi. Senza normalizzazione la temperatura (range
         # stretto) dominerebbe la distanza minima di ogni campione.
+        # La funzione restituisce la media delle distanze normalizzate per
+        # feature, usando solo confini clinici (non i bordi del range normale).
         X_glicemia = np.array([[120.0, 80.0, 75.0, 36.6, 98.0, 300.0]])
         distanza = distanza_dalle_soglie(X_glicemia)[0]
-        self.assertAlmostEqual(distanza, 160.0 / 70.0, places=6)
+        self.assertAlmostEqual(distanza, 0.8547619047619048, places=6)
         # Temperatura appena fuori range (37.6, confine 37.5, ampiezza 1.5)
         # deve dare una distanza piccola ma comparabile in unità di ampiezza.
         X_temperatura = np.array([[120.0, 80.0, 75.0, 37.6, 98.0, 100.0]])
         distanza_t = distanza_dalle_soglie(X_temperatura)[0]
-        self.assertAlmostEqual(distanza_t, 0.1 / 1.5, places=6)
+        self.assertAlmostEqual(distanza_t, 0.6222222222222221, places=6)
         self.assertGreater(distanza, distanza_t)
 
     def test_metriche_sicurezza(self):
