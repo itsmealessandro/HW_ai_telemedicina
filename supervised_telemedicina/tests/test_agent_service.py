@@ -12,6 +12,7 @@ Coprono:
 Nessun import dal legacy (archive/).
 """
 
+import tempfile
 import unittest
 from pathlib import Path
 from typing import Dict
@@ -123,7 +124,13 @@ class TestAnalysisService(unittest.TestCase):
     """Contratto del servizio (ServiceOutcome)."""
 
     def setUp(self):
-        self.servizio = AnalysisService()
+        # DB SQLite temporaneo per ogni test: nessun file lasciato fuori
+        # dal tmpdir e nessuna scrittura sul data/ del repository.
+        self._tmp = tempfile.TemporaryDirectory()
+        self.servizio = AnalysisService(db_path=Path(self._tmp.name) / "analisi.db")
+
+    def tearDown(self):
+        self._tmp.cleanup()
 
     def test_output_è_un_service_outcome(self):
         esito = self.servizio.analizza(vp())

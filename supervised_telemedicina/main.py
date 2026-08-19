@@ -13,6 +13,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent / "src"))
 from telemedicina_supervised.agents.supervised_agent import SupervisedAgent
 from telemedicina_supervised.config import (
     DATA_PROCESSED_DIR,
+    DB_PATH,
     MODEL_ARTIFACT_PATH,
     MODELS_DIR,
     SEED_DEFAULT,
@@ -29,11 +30,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--out-dir", type=Path, default=MODELS_DIR)
     parser.add_argument("--seed", "--seed-base", dest="seed", type=int, default=SEED_DEFAULT)
     parser.add_argument("--modello-path", type=Path, default=MODEL_ARTIFACT_PATH)
+    parser.add_argument("--db-path", type=Path, default=DB_PATH)
     parser.add_argument("--parametri", help="parametri vitali in formato JSON")
     return parser
 
 
-def _esegui_runtime(parametri_json: str, modello_path: Path) -> int:
+def _esegui_runtime(parametri_json: str, modello_path: Path, db_path: Path) -> int:
     try:
         parametri = json.loads(parametri_json)
     except (json.JSONDecodeError, TypeError) as exc:
@@ -46,8 +48,16 @@ def _esegui_runtime(parametri_json: str, modello_path: Path) -> int:
     # Percorso applicativo unico: la CLI è un thin wrapper sul servizio,
     # che orchestra validazione -> SupervisedAgent -> esito (in Fase 7
     # persistenza e notifiche vivranno qui, senza duplicare l'analisi).
-    servizio = AnalysisService(agent=SupervisedAgent(modello_path=modello_path))
-    esito = servizio.analizza(parametri)
+    servizio = AnalysisService(
+        agent=SupervisedAgent(modello_path=modello_path), db_path=db_path
+    )
+    try:
+        esito = servizio.analizza(parametri)
+    except ValueError as exc:
+        # Fallimento RUMOROSO: un record clinico non va mai perso in
+        # silenzio (Fase 7).
+        print(f"Errore di persistenza: {exc}", file=sys.stderr)
+        return 1
     outcome = esito.esito_agente
     if outcome is None:
         print("Errore interno: esito agente non disponibile.", file=sys.stderr)
@@ -118,7 +128,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     if not args.parametri:
         print("Errore: --parametri JSON è richiesto con --run-ml.", file=sys.stderr)
         return 2
-    return _esegui_runtime(args.parametri, args.modello_path)
+    return _esegui_runtime(args.parametri, args.modello_path, args.db_path)
 
 
 if __name__ == "__main__":

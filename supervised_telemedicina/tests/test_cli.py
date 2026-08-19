@@ -69,8 +69,10 @@ class TestCLI(unittest.TestCase):
     def test_runtime_valido_e_fallback(self):
         raw = json.dumps(PARAMETRI)
         output = io.StringIO()
-        with contextlib.redirect_stdout(output):
-            self.assertEqual(cli.main(["--run-ml", "--parametri", raw, "--modello-path", "/missing/model.npz"]), 0)
+        with tempfile.TemporaryDirectory() as tmp:
+            db = Path(tmp) / "analisi.db"
+            with contextlib.redirect_stdout(output):
+                self.assertEqual(cli.main(["--run-ml", "--parametri", raw, "--modello-path", "/missing/model.npz", "--db-path", str(db)]), 0)
         text = output.getvalue()
         self.assertIn("Classe:", text)
         self.assertIn("Raccomandazione:", text)
@@ -87,7 +89,7 @@ class TestCLI(unittest.TestCase):
             raw = json.dumps(dict(PARAMETRI, pressione_sistolica=185, pressione_diastolica=110))
             output = io.StringIO()
             with contextlib.redirect_stdout(output):
-                self.assertEqual(cli.main(["--run-ml", "--parametri", raw, "--modello-path", str(path)]), 0)
+                self.assertEqual(cli.main(["--run-ml", "--parametri", raw, "--modello-path", str(path), "--db-path", str(Path(tmp) / "analisi.db")]), 0)
             text = output.getvalue()
             self.assertIn("Classe: alto", text)
             self.assertIn("Fallback rule-based: safety gate: classe critica, MLP bypassato", text)
@@ -101,7 +103,7 @@ class TestCLI(unittest.TestCase):
             raw = json.dumps(PARAMETRI)
             output = io.StringIO()
             with contextlib.redirect_stdout(output):
-                self.assertEqual(cli.main(["--run-ml", "--parametri", raw, "--modello-path", str(path)]), 0)
+                self.assertEqual(cli.main(["--run-ml", "--parametri", raw, "--modello-path", str(path), "--db-path", str(Path(tmp) / "analisi.db")]), 0)
             text = output.getvalue()
             self.assertIn("Modello MLP usato: si", text)
             self.assertIn("Probabilità:", text)

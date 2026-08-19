@@ -4,10 +4,13 @@ servizio di analisi.
 
 Coordina il flusso: validazione -> SupervisedAgent -> esito.
 
-In questa fase NON esiste ancora un database: l'esito viene loggato su
-console e registrato in una struttura dati in memoria (`self.storico`).
-La persistenza reale (SQLite o equivalente) arriverà nelle fasi
-successive senza modificare il contratto di `analizza`.
+Dalla Fase 7 l'esito viene PERSISTITO in SQLite (`AnalisiDatabase`, path
+configurabile in `config.DB_PATH` o via costruttore) e i casi critici
+(classe 'alto' o input invalido) generano una notifica (DB + stderr).
+Il contratto pubblico di `analizza` non cambia: la persistenza è un
+comportamento aggiuntivo dietro la stessa API. Se il database non è
+scrivibile l'analisi fallisce RUMOROSAMENTE (ValueError) per non perdere
+record clinici.
 
 Nessuna soglia numerica è definita qui: l'unica fonte è
 `telemedicina_supervised.safety.safety_rules`.
@@ -23,14 +26,20 @@ classificazione resta comunque delegata al `SupervisedAgent`; il servizio
 non duplica alcuna soglia né logica di classificazione.
 """
 
+import sqlite3
 from dataclasses import dataclass, field
-from typing import Any, Dict, List
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any, Dict, List, Optional
 
 from telemedicina_supervised.agents.supervised_agent import (
     AgentOutcome,
     SupervisedAgent,
 )
+from telemedicina_supervised.config import DB_PATH
+from telemedicina_supervised.database.analisi_db import AnalisiDatabase
 from telemedicina_supervised.safety.safety_rules import CLASSE_ERRORE, valida_parametri
+from telemedicina_supervised.services.notifications import notifica_critico
 
 
 @dataclass
@@ -65,19 +74,28 @@ _MESSAGGI_PAZIENTE: Dict[str, str] = {
 
 class AnalysisService:
     """
-    Servizio che orchestra validazione -> agente -> esito.
+    Servizio che orchestra validazione -> agente -> esito -> persistenza.
 
-    Baseline Fase 1: l'agente è la versione rule-based. In Fase 5 il
-    SupervisedAgent esporrà l'MLP, ma il contratto di `analizza` resta
+    Dalla Fase 7 ogni analisi viene registrata su SQLite e i casi critici
+    generano una notifica (DB + stderr). Il contratto di `analizza` resta
     invariato e il safety gate mantiene la precedenza assoluta.
     """
 
-    def __init__(self, agent: Any = None):
+    def __init__(self, agent: Any = None, db_path: Optional[Path] = None):
         self.agent: Any = agent if agent is not None else SupervisedAgent()
-        # Struttura dati in memoria al posto del database (fasi successive):
-        # ultima analisi + storico delle analisi.
+        # Path del database SQLite: esplicito (test/CLI) o da config.
+        self._db_path: Path = Path(db_path) if db_path is not None else DB_PATH
+        self._db: Optional[AnalisiDatabase] = None
+        # Struttura dati in memoria (compatibilità): ultima analisi +
+        # storico. La fonte persistente è il database SQLite.
         self.ultima: Dict[str, Any] = {}
         self.storico: List[Dict[str, Any]] = []
+
+    def _ottieni_db(self) -> AnalisiDatabase:
+        """Connessione lazy: schema creato alla prima analisi."""
+        if self._db is None:
+            self._db = AnalisiDatabase(self._db_path)
+        return self._db
 
     def analizza(self, parametri: Any) -> ServiceOutcome:
         """
@@ -120,7 +138,8 @@ class AnalysisService:
             esito_agente=outcome,
         )
 
-        # 4. Registrazione in memoria (database in fasi successive).
+        # 4. Registrazione in memoria (compatibilità con i consumatori
+        #    esistenti; la fonte persistente è il database SQLite).
         record = {
             "classe": classe,
             "allerta_medico": allerta_medico,
@@ -130,7 +149,31 @@ class AnalysisService:
         self.ultima = record
         self.storico.append(record)
 
-        # 5. Log su console (baseline: nessun database reale).
+        # 5. Persistenza SQLite (Fase 7). Un unico timestamp UTC per
+        #    analisi e notifica. Se il database non è scrivibile il
+        #    servizio FALLISCE RUMOROSAMENTE: un record clinico non va
+        #    mai perso in silenzio.
+        timestamp = datetime.now(timezone.utc).isoformat()
+        record_db = {
+            "timestamp": timestamp,
+            "classe": classe,
+            "allerta_medico": allerta_medico,
+            "errori": list(errori),
+            "probabilita": outcome.probabilita,
+            "metadati": outcome.metadati,
+            "messaggio": messaggio_paziente,
+        }
+        try:
+            database = self._ottieni_db()
+            database.inserisci_analisi(record_db)
+            if allerta_medico:
+                notifica_critico(database, timestamp, classe, messaggio_paziente)
+        except (sqlite3.Error, OSError) as exc:
+            raise ValueError(
+                f"database non scrivibile ({self._db_path}): {exc}"
+            ) from exc
+
+        # 6. Log su console.
         print(
             f"[AnalysisService] classe={classe!r} allerta_medico={allerta_medico} "
             f"errori={len(errori)}"
@@ -139,5 +182,5 @@ class AnalysisService:
         return risultato
 
     def ottieni_storico(self) -> List[Dict[str, Any]]:
-        """Storico in memoria delle analisi (placeholder del database)."""
+        """Storico in memoria delle analisi (compatibilità)."""
         return list(self.storico)

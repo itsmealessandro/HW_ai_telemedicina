@@ -11,6 +11,7 @@ DATA_PROCESSED_DIR = PROJECT_ROOT / "data" / "processed"
 MODELS_DIR = PROJECT_ROOT / "data" / "models"
 MODEL_ARTIFACT_PATH = MODELS_DIR / "mlp_telemedicina.npz"
 REPORT_PATH = MODELS_DIR / "report.json"
+DB_PATH = PROJECT_ROOT / "data" / "analisi.db"
 SEED_DEFAULT = 41
 SOGLIA_INCERTEZZA = 0.6
 PAZIENZA = 5
