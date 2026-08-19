@@ -60,14 +60,22 @@ CREATE TABLE IF NOT EXISTS notifiche (
 class AnalisiDatabase:
     """Accesso SQLite con schema lazy-init e commit per operazione."""
 
-    def __init__(self, path: Path) -> None:
+    def __init__(self, path: Path, read_only: bool = False) -> None:
         self.path = Path(path)
+        self.read_only = read_only
         self._connessione: Optional[sqlite3.Connection] = None
 
     def _conn(self) -> sqlite3.Connection:
         if self._connessione is None:
-            self._connessione = sqlite3.connect(str(self.path))
-            self._connessione.executescript(SCHEMA_SQL)
+            if self.read_only:
+                # Apertura in sola lettura (URI mode=ro): nessuna scrittura
+                # possibile, schema lazy-init disattivato (deve già esistere).
+                self._connessione = sqlite3.connect(
+                    f"file:{self.path}?mode=ro", uri=True
+                )
+            else:
+                self._connessione = sqlite3.connect(str(self.path))
+                self._connessione.executescript(SCHEMA_SQL)
         return self._connessione
 
     def inserisci_analisi(self, record: Dict[str, Any]) -> int:
