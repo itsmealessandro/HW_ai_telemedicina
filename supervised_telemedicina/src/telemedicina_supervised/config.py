@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import Optional
 
 from telemedicina_supervised.ml.mlp import MLP
+from telemedicina_supervised.safety.safety_rules import CLASSI
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 DATA_PROCESSED_DIR = PROJECT_ROOT / "data" / "processed"
@@ -12,6 +13,7 @@ MODEL_ARTIFACT_PATH = MODELS_DIR / "mlp_telemedicina.npz"
 REPORT_PATH = MODELS_DIR / "report.json"
 SEED_DEFAULT = 41
 SOGLIA_INCERTEZZA = 0.6
+PAZIENZA = 5
 
 # Copia immutabile dei default della griglia di training, esposta per la CLI.
 TRAINING_HYPERPARAMETERS = (
@@ -29,7 +31,7 @@ def carica_modello(path: Optional[Path] = None) -> Optional[MLP]:
     """Carica un artifact valido; per qualunque errore restituisce ``None``."""
     try:
         modello = MLP.carica(Path(path) if path is not None else MODEL_ARTIFACT_PATH)
-        if tuple(modello.classi) != ("basso", "medio", "alto"):
+        if tuple(modello.classi) != CLASSI:
             return None
         return modello
     except Exception:

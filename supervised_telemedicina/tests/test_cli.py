@@ -17,6 +17,7 @@ from telemedicina_supervised.config import (
     carica_modello,
 )
 from telemedicina_supervised.ml.mlp import MLP
+from telemedicina_supervised.ml.scaler import StandardScaler
 from telemedicina_supervised.safety.safety_rules import FEATURE_ORDER
 
 
@@ -28,6 +29,18 @@ PARAMETRI = {
     "saturazione_ossigeno": 98,
     "glicemia": 100,
 }
+
+
+def _artifact(path: Path) -> MLP:
+    """Artifact valido che predice 'basso' con confidenza alta."""
+    modello = MLP(6, 2, ("basso", "medio", "alto"), seed=SEED_DEFAULT)
+    modello.W1.fill(0.0)
+    modello.W2.fill(0.0)
+    modello.b2[:] = 0.0
+    modello.b2[0] = 3.0
+    modello.scaler = StandardScaler().fit(np.ones((3, 6)))
+    modello.salva(path)
+    return modello
 
 
 class TestCLI(unittest.TestCase):
@@ -62,6 +75,37 @@ class TestCLI(unittest.TestCase):
         self.assertIn("Classe:", text)
         self.assertIn("Raccomandazione:", text)
         self.assertIn("modello non trovato in /missing/model.npz; eseguire python main.py --build-ml", text)
+        # La CLI passa dal AnalysisService (percorso applicativo unico).
+        self.assertIn("[AnalysisService]", text)
+
+    def test_runtime_alto_con_artifact(self):
+        # Caso critico da CLI: il safety gate bypassa l'MLP e la risposta
+        # resta identica a prima (classe, messaggio, metadati).
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "model.npz"
+            _artifact(path)
+            raw = json.dumps(dict(PARAMETRI, pressione_sistolica=185, pressione_diastolica=110))
+            output = io.StringIO()
+            with contextlib.redirect_stdout(output):
+                self.assertEqual(cli.main(["--run-ml", "--parametri", raw, "--modello-path", str(path)]), 0)
+            text = output.getvalue()
+            self.assertIn("Classe: alto", text)
+            self.assertIn("Fallback rule-based: safety gate: classe critica, MLP bypassato", text)
+            self.assertIn("Metadati:", text)
+            self.assertIn('"override_sicurezza": false', text)
+
+    def test_runtime_modello_usato(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "model.npz"
+            _artifact(path)
+            raw = json.dumps(PARAMETRI)
+            output = io.StringIO()
+            with contextlib.redirect_stdout(output):
+                self.assertEqual(cli.main(["--run-ml", "--parametri", raw, "--modello-path", str(path)]), 0)
+            text = output.getvalue()
+            self.assertIn("Modello MLP usato: si", text)
+            self.assertIn("Probabilità:", text)
+            self.assertIn("Classe: basso", text)
 
     def test_config_defaults_and_loader(self):
         self.assertEqual(SEED_DEFAULT, 41)

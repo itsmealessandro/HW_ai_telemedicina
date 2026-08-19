@@ -1,9 +1,9 @@
 """Safety-gated supervised agent (rule-based gate + optional MLP)."""
 
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from collections.abc import Mapping
-from typing import Any, Callable, Dict, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 import numpy as np
 
@@ -36,6 +36,10 @@ class AgentOutcome:
     fallback: bool = False
     motivo_fallback: Optional[str] = None
     override_sicurezza: bool = False
+    # Dettagli strutturati dell'analisi rule-based (già calcolati in
+    # predict): esposti per il display senza duplicare la logica.
+    anomalie: List[Dict[str, Any]] = field(default_factory=list)
+    pattern: List[str] = field(default_factory=list)
 
     @property
     def metadati(self) -> Dict[str, Any]:
@@ -158,6 +162,8 @@ class SupervisedAgent:
                 if errore
                 else "safety gate: classe critica, MLP bypassato"
             ),
+            anomalie=list(dettagli["anomalie"]),
+            pattern=list(dettagli["pattern"]),
         )
 
     def predict(self, parametri: Any) -> AgentOutcome:
@@ -233,6 +239,8 @@ class SupervisedAgent:
             classe_regola=base.classe,
             confidenza=confidenza,
             override_sicurezza=base.override_sicurezza,
+            anomalie=list(dettagli["anomalie"]),
+            pattern=list(dettagli["pattern"]),
         )
 
     def analizza_parametri(self, parametri: Any) -> Dict[str, Any]:

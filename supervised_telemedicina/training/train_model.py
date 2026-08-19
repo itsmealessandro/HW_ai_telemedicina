@@ -29,6 +29,7 @@ from typing import Any, Dict, List, Tuple
 
 import numpy as np
 
+from telemedicina_supervised.config import GRID, PAZIENZA, SEED_DEFAULT
 from telemedicina_supervised.ml.labels import to_indici
 from telemedicina_supervised.ml.mlp import MLP
 from telemedicina_supervised.ml.scaler import StandardScaler
@@ -39,19 +40,6 @@ from training.metrics import (
     riepilogo_metriche,
 )
 from training.synthetic_generator import genera_batch
-
-# Iperparametri predefiniti da confrontare (scelta su validation).
-GRID: List[Dict[str, Any]] = [
-    {"n_hidden": 16, "lr": 0.01, "batch_size": 32, "epoche": 25},
-    {"n_hidden": 16, "lr": 0.05, "batch_size": 32, "epoche": 25},
-    {"n_hidden": 32, "lr": 0.01, "batch_size": 32, "epoche": 25},
-    {"n_hidden": 32, "lr": 0.05, "batch_size": 32, "epoche": 25},
-    {"n_hidden": 64, "lr": 0.01, "batch_size": 64, "epoche": 25},
-    {"n_hidden": 64, "lr": 0.05, "batch_size": 64, "epoche": 25},
-]
-
-SEED_DEFAULT: int = 41
-PAZIENZA: int = 5
 
 
 def carica_dataset(directory: Path) -> Dict[str, np.ndarray]:

@@ -17,7 +17,7 @@ from telemedicina_supervised.config import (
     MODELS_DIR,
     SEED_DEFAULT,
 )
-from telemedicina_supervised.safety.safety_rules import analizza
+from telemedicina_supervised.services.analysis_service import AnalysisService
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -43,23 +43,30 @@ def _esegui_runtime(parametri_json: str, modello_path: Path) -> int:
         print("Input non valido: --parametri deve contenere un oggetto JSON.", file=sys.stderr)
         return 2
 
-    dettagli = analizza(parametri)
-    agent = SupervisedAgent(modello_path=modello_path)
-    outcome = agent.predict(parametri)
-    print(f"Classe: {outcome.classe}")
-    if dettagli["anomalie"]:
+    # Percorso applicativo unico: la CLI è un thin wrapper sul servizio,
+    # che orchestra validazione -> SupervisedAgent -> esito (in Fase 7
+    # persistenza e notifiche vivranno qui, senza duplicare l'analisi).
+    servizio = AnalysisService(agent=SupervisedAgent(modello_path=modello_path))
+    esito = servizio.analizza(parametri)
+    outcome = esito.esito_agente
+    if outcome is None:
+        print("Errore interno: esito agente non disponibile.", file=sys.stderr)
+        return 1
+
+    print(f"Classe: {esito.classe}")
+    if outcome.anomalie:
         anomalie = "; ".join(
             f"{anomalia['parametro']}={anomalia['valore']}"
             f" ({anomalia['gravita']}, {anomalia['direzione']})"
-            for anomalia in dettagli["anomalie"]
+            for anomalia in outcome.anomalie
         )
         print("Anomalie: " + anomalie)
     else:
         print("Anomalie: nessuna")
-    print("Pattern: " + ("; ".join(dettagli["pattern"]) if dettagli["pattern"] else "nessuno"))
+    print("Pattern: " + ("; ".join(outcome.pattern) if outcome.pattern else "nessuno"))
 
-    if not dettagli["valido"]:
-        print("Errori: " + "; ".join(dettagli["errori"]))
+    if esito.errori:
+        print("Errori: " + "; ".join(esito.errori))
 
     if outcome.probabilita is None:
         print("Probabilità: non disponibile (baseline rule-based)")

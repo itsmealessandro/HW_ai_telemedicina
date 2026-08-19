@@ -51,6 +51,9 @@ class ServiceOutcome:
     messaggio_paziente: str
     allerta_medico: bool
     errori: List[str] = field(default_factory=list)
+    # Esito completo dell'agente (probabilità, metadati, anomalie, pattern):
+    # esposto per il display della CLI senza duplicare la logica di analisi.
+    esito_agente: Any = None
 
 
 _MESSAGGI_PAZIENTE: Dict[str, str] = {
@@ -114,6 +117,7 @@ class AnalysisService:
             messaggio_paziente=messaggio_paziente,
             allerta_medico=allerta_medico,
             errori=list(errori),
+            esito_agente=outcome,
         )
 
         # 4. Registrazione in memoria (database in fasi successive).
