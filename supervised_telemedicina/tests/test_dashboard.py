@@ -19,12 +19,15 @@ Verifica che:
 Nessuna dipendenza da matplotlib: tutto gira con stdlib + numpy.
 """
 
+import io
 import json
 import os
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
+from contextlib import redirect_stderr
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -770,6 +773,92 @@ class TestVista5Incertezza(unittest.TestCase):
                 _valore_metriche(html_doc, "Casi critici nel test (classe alto)"),
                 "—",
             )
+
+
+class TestServeAvvioChiusura(unittest.TestCase):
+    def test_serve_avvia_e_chiude_pulito(self):
+        # _serve con Event iniettabile: parte, risponde e si chiude senza
+        # eccezioni ne' traceback (stesso codice usato da Ctrl+C/SIGTERM).
+        # Porta libera via PORT (la 8000 di default può essere occupata).
+        import socket
+        import threading
+        import urllib.request
+        from unittest import mock
+
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            db_path = tmp_path / "analisi.db"
+            _crea_db_con_casi(db_path)
+            out_path = tmp_path / "dashboard.html"
+            out_path.write_text("<!doctype html><html></html>", encoding="utf-8")
+
+            libera = socket.socket()
+            libera.bind(("127.0.0.1", 0))
+            porta = libera.getsockname()[1]
+            libera.close()
+
+            ferma = threading.Event()
+            esito = []
+
+            def _avvia():
+                esito.append(
+                    genera_dashboard._serve(out_path, db_path, ferma)
+                )
+
+            with mock.patch.dict(
+                os.environ, {"PORT": str(porta)}, clear=False
+            ):
+                thread = threading.Thread(target=_avvia, daemon=True)
+                thread.start()
+                try:
+                    # Attende che il server risponda (max ~5s).
+                    risposta = None
+                    for _i in range(50):
+                        try:
+                            with urllib.request.urlopen(
+                                f"http://127.0.0.1:{porta}/dashboard.html",
+                                timeout=1,
+                            ) as r:
+                                risposta = r.status
+                            break
+                        except Exception:
+                            time.sleep(0.1)
+                    self.assertEqual(risposta, 200)
+                    # Chiusura pulita: nessuna eccezione nel thread, uscita 0.
+                    ferma.set()
+                    thread.join(timeout=5)
+                    self.assertFalse(thread.is_alive())
+                    self.assertEqual(esito, [0])
+                finally:
+                    ferma.set()
+                    thread.join(timeout=5)
+
+    def test_serve_porta_occupata_errore_amichevole(self):
+        # Porta già occupata -> codice 1 e messaggio chiaro, non un traceback.
+        import socket
+        from unittest import mock
+
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            db_path = tmp_path / "analisi.db"
+            _crea_db_con_casi(db_path)
+            out_path = tmp_path / "dashboard.html"
+            out_path.write_text("<!doctype html>", encoding="utf-8")
+
+            occupato = socket.socket()
+            occupato.bind(("127.0.0.1", 0))
+            occupato.listen(1)
+            try:
+                porta = occupato.getsockname()[1]
+                with mock.patch.dict(
+                    os.environ, {"PORT": str(porta)}, clear=False
+                ):
+                    with redirect_stderr(io.StringIO()) as err:
+                        esito = genera_dashboard._serve(out_path, db_path)
+                self.assertEqual(esito, 1)
+                self.assertIn("Porta già in uso", err.getvalue())
+            finally:
+                occupato.close()
 
 
 if __name__ == "__main__":

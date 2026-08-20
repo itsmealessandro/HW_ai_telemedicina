@@ -41,6 +41,7 @@ import html
 import json
 import os
 import sys
+import threading
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
@@ -1343,20 +1344,66 @@ def crea_handler(db_path: Path, directory: Path):
     return Handler
 
 
-def _serve(out_path: Path, db_path: Path) -> None:
-    """Serve il file generato + endpoint /api/analisi (sola lettura)."""
+def _serve(
+    out_path: Path, db_path: Path, ferma: Optional[threading.Event] = None
+) -> int:
+    """Serve il file generato + endpoint /api/analisi (sola lettura).
+
+    Gestione avvio/chiusura:
+      - SIGINT (Ctrl+C) e SIGTERM arrestano il server con un messaggio
+        pulito (nessun traceback): il gestore imposta l'evento ``ferma`` e il
+        ciclo di ``serve_forever`` (thread daemon) viene chiuso via
+        ``server.shutdown()``;
+      - porta già occupata -> errore amichevole e codice di uscita 1;
+      - ``ferma`` è iniettabile nei test (Event impostato da un altro
+        thread) per verificare la chiusura pulita senza segnali.
+    """
     import http.server
+    import signal
+
+    if ferma is None:
+        ferma = threading.Event()
+    if threading.current_thread() is threading.main_thread():
+
+        def _arresta(_segno, _frame):
+            ferma.set()
+
+        signal.signal(signal.SIGINT, _arresta)
+        signal.signal(signal.SIGTERM, _arresta)
+        if hasattr(signal, "SIGHUP"):
+            signal.signal(signal.SIGHUP, _arresta)
 
     porta = int(os.environ.get("PORT", "8000"))
     handler = crea_handler(db_path, out_path.parent)
-    with http.server.ThreadingHTTPServer(("127.0.0.1", porta), handler) as server:
+    try:
+        server = http.server.ThreadingHTTPServer(("127.0.0.1", porta), handler)
+    except OSError as exc:
+        print(
+            f"ERRORE: impossibile avviare il server sulla porta {porta}: {exc}",
+            file=sys.stderr,
+        )
+        print(
+            "Porta già in uso? Chiudi l'istanza precedente oppure usa "
+            f"PORT=<altra> python tools/genera_dashboard.py --serve",
+            file=sys.stderr,
+        )
+        return 1
+    with server:
         porta_reale = server.server_address[1]
         print(
             f"Dashboard disponibile su http://127.0.0.1:{porta_reale}/{out_path.name}"
         )
         print(f"API: http://127.0.0.1:{porta_reale}/api/analisi")
         print("Premere Ctrl+C per fermare il server.")
-        server.serve_forever()
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            ferma.wait()
+        finally:
+            server.shutdown()
+            thread.join(timeout=2)
+        print("Server arrestato: dashboard chiusa.")
+    return 0
 
 
 def main(argv: Optional[Sequence[str]] = None) -> int:
@@ -1387,7 +1434,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     print(f"Dashboard generata: {out_path}")
 
     if args.serve:
-        _serve(out_path, db_path)
+        return _serve(out_path, db_path)
     return 0
 
 

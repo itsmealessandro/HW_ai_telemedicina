@@ -85,6 +85,27 @@ cd archive/legacy_qtable_rule_based && python -m tests.test_examples   # 14/14
 
 ## Dashboard di visualizzazione (completa, V1-V4)
 
+**Cosa è stato fatto, in breve** — Un unico file HTML (apribile in qualunque
+browser, senza internet) che racconta a colpo d'occhio come funziona tutto il
+sistema supervised: dalle singole analisi registrate nel database fino ai
+numeri del training. È uno strumento didattico **read-only**: guarda i dati,
+non li tocca mai.
+
+**I punti messi in risalto**:
+
+- **La distillazione** — il MLP impara dal "teacher" (regole scritte a mano):
+  le heatmap mostrano le regioni di decisione dei due affiancate, e lo
+  scatter evidenzia i 298 errori del MLP.
+- **La sicurezza** — il safety gate è deterministico e ha precedenza
+  assoluta: *nessun caso critico passa mai dall'MLP* (richiamo 1.0 per
+  costruzione). La vista Incertezza mostra la confidenza del modello e la
+  soglia oltre la quale il sistema non si fida.
+- **La trasparenza** — ogni aspetto è leggibile: curva di loss del training,
+  architettura della rete, tabella dei casi "mancati", flusso decisionale
+  interattivo caso per caso.
+- **La riproducibilità** — seed e split congelati e hash di provenienza di
+  ogni componente: stessi input, stessi numeri, sempre.
+
 Strumento didattico **read-only** che visualizza il sistema supervised in 6
 viste, in un unico file HTML autonomo (CSS/JS inline, nessuna richiesta di
 rete). Generato da `tools/genera_dashboard.py`:
@@ -94,7 +115,12 @@ python tools/genera_dashboard.py                          # build statico
 python tools/genera_dashboard.py --serve                  # build + http://127.0.0.1:8000
 python tools/genera_dashboard.py --out OUT --db-path DB   # output/database custom
 python tools/genera_dashboard.py --metadati-path M --report-path R --test-path D
+tools/avvia_dashboard.sh                                  # avvio rapido: build + server + browser
 ```
+
+Il launcher `tools/avvia_dashboard.sh` gestisce avvio e chiusura: build,
+server, apertura automatica del browser e chiusura pulita con `Ctrl+C`
+(nessun traceback; porta custom con `PORT=8001 tools/avvia_dashboard.sh`).
 
 Opzioni: `--out` (default `data/dashboard.html`), `--db-path` (default
 `data/analisi.db`), `--metadati-path` (default `data/processed/metadati.json`),
