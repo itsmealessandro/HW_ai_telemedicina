@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""tools/genera_dashboard.py — Dashboard HTML statica del sistema supervised (Fase V2).
+"""tools/genera_dashboard.py — Dashboard HTML statica del sistema supervised (Fase V3).
 
 Genera un file HTML autonomo (CSS e JS inline, nessun CDN, nessuna richiesta
 di rete) con:
@@ -8,17 +8,23 @@ di rete) con:
     "Aggiorna" (funziona solo con --serve, via GET /api/analisi);
   - vista "2. Flusso decisionale": diagramma verticale del caso selezionato
     (click su una riga della Live), con i valori reali dai metadati;
+  - vista "3. Teacher vs MLP": banner metriche, matrice di confusione,
+    scatter degli errori e regioni di decisione affiancate (figure
+    matplotlib incorporate come base64, da ``report.json`` e dati congelati);
+  - vista "4. Training": curve loss, confronto grid, gradient check e
+    architettura dell'MLP;
   - vista "6. Riproducibilità": seed, split e hash da ``metadati.json``;
-  - banner didattico obbligatorio e 6 tab (le viste 3-5 sono segnaposto).
+  - banner didattico obbligatorio e 6 tab (la vista 5 è segnaposto).
 
-Solo stdlib in questa fase: matplotlib NON viene importato (le figure
-arriveranno nelle fasi successive, vedi ``requirements_dashboard.txt``).
+matplotlib è importato LAZY (via ``tools/_figure.py``): senza la dipendenza
+dev le figure diventano segnaposto con messaggio, mai un crash.
 
 Uso:
     python tools/genera_dashboard.py                  # build statico
     python tools/genera_dashboard.py --out OUT        # output custom
     python tools/genera_dashboard.py --db-path DB     # database custom
     python tools/genera_dashboard.py --metadati-path M  # metadati custom
+    python tools/genera_dashboard.py --report-path R  # report custom
     python tools/genera_dashboard.py --serve          # build + http.server
                                                      # (+ GET /api/analisi)
 
@@ -37,10 +43,19 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 # Percorso assoluto a src/ (il tool vive in tools/, un livello sotto la root).
 SRC_DIR = Path(__file__).resolve().parent.parent / "src"
 sys.path.insert(0, str(SRC_DIR))
+# tools/ stesso: per l'import lazy di _figure (matplotlib NON a livello di
+# modulo, così il tool gira anche senza la dipendenza dev).
+TOOLS_DIR = Path(__file__).resolve().parent
+sys.path.insert(0, str(TOOLS_DIR))
 
 from telemedicina_supervised.config import (  # noqa: E402
+    CLASSI,
     DATA_PROCESSED_DIR,
     DB_PATH,
+    GRID,
+    MODEL_ARTIFACT_PATH,
+    PAZIENZA,
+    REPORT_PATH,
     SOGLIA_INCERTEZZA,
 )
 from telemedicina_supervised.database.analisi_db import AnalisiDatabase  # noqa: E402
@@ -48,6 +63,8 @@ from telemedicina_supervised.database.analisi_db import AnalisiDatabase  # noqa:
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 OUTPUT_DEFAULT = PROJECT_ROOT / "data" / "dashboard.html"
 METADATI_DEFAULT = DATA_PROCESSED_DIR / "metadati.json"
+REPORT_DEFAULT = REPORT_PATH
+ARTIFACT_DEFAULT = MODEL_ARTIFACT_PATH
 
 BANNER = (
     "Dati sintetici: questa dashboard mostra esempi generati artificialmente, "
@@ -248,6 +265,23 @@ def _leggi_metadati(
     except Exception as exc:
         print(f"Errore durante la lettura dei metadati: {exc}", file=sys.stderr)
         return None, f"Errore durante la lettura dei metadati: {exc}"
+
+
+def _leggi_report(
+    report_path: Path,
+) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
+    """Legge report.json (metriche, loss, matrice); (None, avviso) se assente."""
+    if not Path(report_path).is_file():
+        return None, (
+            f"Report non trovato: {report_path}. Eseguire prima "
+            "python training/train_model.py --build-ml"
+        )
+    try:
+        with open(report_path, encoding="utf-8") as file:
+            return json.load(file), None
+    except Exception as exc:
+        print(f"Errore durante la lettura del report: {exc}", file=sys.stderr)
+        return None, f"Errore durante la lettura del report: {exc}"
 
 
 # ---------------------------------------------------------------------------
@@ -481,6 +515,51 @@ footer {
   font-size: 12px;
   color: #6c757d;
 }
+.metriche-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin: 14px 0;
+}
+.metriche-card {
+  flex: 1 1 180px;
+  background: #f0f4f8;
+  border: 1px solid #dde5ee;
+  border-radius: 8px;
+  padding: 12px 14px;
+  text-align: center;
+}
+.metriche-valore {
+  display: block;
+  font-size: 22px;
+  font-weight: 700;
+  color: #0d1b2a;
+}
+.metriche-etichetta {
+  display: block;
+  font-size: 12px;
+  color: #6c757d;
+  margin-top: 4px;
+}
+.nota {
+  font-size: 13px;
+  color: #6c757d;
+  font-style: italic;
+  margin: 10px 0 0;
+}
+.figura { margin: 14px 0; text-align: center; }
+.figura-img {
+  max-width: 100%;
+  height: auto;
+  border: 1px solid #e3e6ea;
+  border-radius: 6px;
+  background: #ffffff;
+}
+.figura figcaption {
+  font-size: 12px;
+  color: #6c757d;
+  margin-top: 6px;
+}
 """
 
 
@@ -696,12 +775,218 @@ def _pannello_riproducibilita(
     )
 
 
+# ---------------------------------------------------------------------------
+# Viste 3-4: figure matplotlib (lazy, via tools/_figure.py) con degrado
+# ---------------------------------------------------------------------------
+
+def _figura_html(base64_png: Optional[str], didascalia: str, fallback: str) -> str:
+    """Figura base64 come <img> incorporato, o segnaposto con messaggio."""
+    if base64_png:
+        return (
+            '<figure class="figura">'
+            f'<img class="figura-img" src="data:image/png;base64,{base64_png}" '
+            f'alt="{html.escape(didascalia)}">'
+            f"<figcaption>{html.escape(didascalia)}</figcaption>"
+            "</figure>"
+        )
+    return f'<p class="segnaposto">{html.escape(fallback)}</p>'
+
+
+def _carica_test_e_modello() -> Tuple[Optional[Any], Optional[Any], Optional[Any], Optional[str]]:
+    """(X_test, y_test, modello) con degrado grazioso; modello espone .scaler."""
+    try:
+        import numpy as np
+        from telemedicina_supervised.ml.mlp import MLP
+
+        X_test = np.load(DATA_PROCESSED_DIR / "X_test.npy")
+        y_test = np.load(DATA_PROCESSED_DIR / "y_test.npy")
+        modello = MLP.carica(ARTIFACT_DEFAULT)
+        if modello.scaler is None:
+            return None, None, None, (
+                "Artifact senza scaler: rigenerare con "
+                "python training/train_model.py --build-ml"
+            )
+        return X_test, y_test, modello, None
+    except Exception as exc:
+        print(f"Errore durante il caricamento di test/artifact: {exc}", file=sys.stderr)
+        return None, None, None, (
+            "Dati di test o artifact non disponibili: eseguire "
+            "python training/train_model.py --build-ml"
+        )
+
+
+def _pannello_distillazione(
+    report: Optional[Dict[str, Any]],
+    avviso_report: Optional[str],
+) -> str:
+    """Vista 3: teacher vs MLP (banner metriche, confusione, scatter, regioni).
+
+    I numeri del banner sono LETTI da report.json (mai hardcoded); le figure
+    ricalcolano solo ciò che serve alla visualizzazione (predizioni MLP,
+    distanze dalle soglie, label del teacher sulla griglia).
+    """
+    if avviso_report or not isinstance(report, dict):
+        return (
+            '<section class="tab-panel" data-tab="teacher">'
+            f'<div class="avviso">{html.escape(avviso_report or "Report non disponibile")}</div>'
+            '<p class="segnaposto">Eseguire python training/train_model.py --build-ml '
+            "per generare il report con le metriche.</p>"
+            "</section>"
+        )
+    congelato = report.get("metriche_test_congelato") or {}
+    no_buffer = report.get("metriche_test_no_buffer") or {}
+    sicurezza = congelato.get("sicurezza") or {}
+    acc_c = congelato.get("accuracy")
+    acc_nb = no_buffer.get("accuracy")
+    kappa = congelato.get("kappa_cohen")
+    recall_alto = sicurezza.get("recall_alto")
+
+    def _num(valore: Any, decimali: int = 4) -> str:
+        return f"{valore:.{decimali}f}" if isinstance(valore, (int, float)) else "—"
+
+    metriche = (
+        '<div class="metriche-grid">'
+        f'<div class="metriche-card"><span class="metriche-valore">{_num(acc_c)}</span>'
+        '<span class="metriche-etichetta">Accuracy test congelato (bufferizzato)</span></div>'
+        f'<div class="metriche-card"><span class="metriche-valore">{_num(acc_nb)}</span>'
+        '<span class="metriche-etichetta">Accuracy test senza buffer</span></div>'
+        f'<div class="metriche-card"><span class="metriche-valore">{_num(kappa)}</span>'
+        '<span class="metriche-etichetta">Cohen kappa (congelato)</span></div>'
+        f'<div class="metriche-card"><span class="metriche-valore">{_num(recall_alto)}</span>'
+        '<span class="metriche-etichetta">Recall classe alto (congelato)</span></div>'
+        "</div>"
+    )
+    nota = report.get("interpretazione")
+    nota_html = (
+        f'<p class="nota">{html.escape(nota)}</p>' if isinstance(nota, str) else ""
+    )
+
+    try:
+        import _figure  # lazy: matplotlib non serve se il report manca
+    except Exception as exc:
+        print(f"Errore durante l'import di _figure: {exc}", file=sys.stderr)
+        _figure = None
+
+    matrice = congelato.get("matrice_confusione")
+    fig_confusione = (
+        _figure.figura_confusione(matrice, "Matrice di confusione — test congelato")
+        if _figure is not None and matrice
+        else None
+    )
+    X_test, y_test, modello, avviso_dati = _carica_test_e_modello()
+    fig_scatter = None
+    fig_regioni = None
+    if _figure is not None and modello is not None and X_test is not None and y_test is not None:
+        fig_scatter = _figure.figura_scatter_errori(
+            X_test, y_test, modello, modello.scaler
+        )
+        fig_regioni = _figure.figura_heatmap_regioni(
+            X_test, modello, modello.scaler
+        )
+    avviso_dati_html = (
+        f'<div class="avviso">{html.escape(avviso_dati)}</div>' if avviso_dati else ""
+    )
+
+    return (
+        '<section class="tab-panel" data-tab="teacher">'
+        '<div class="card">'
+        "<h2>Knowledge distillation — teacher vs MLP</h2>"
+        f"{metriche}"
+        f"{nota_html}"
+        "</div>"
+        '<div class="card">'
+        "<h2>Matrice di confusione (test congelato)</h2>"
+        f"{_figura_html(fig_confusione, 'Matrice di confusione — test congelato', 'Matrice di confusione non disponibile nel report.')}"
+        "</div>"
+        '<div class="card">'
+        "<h2>Errori dell'MLP sul test congelato</h2>"
+        f"{avviso_dati_html}"
+        f"{_figura_html(fig_scatter, 'Scatter sistolica × glicemia con errori evidenziati', 'Scatter non disponibile: servono dataset di test e artifact MLP.')}"
+        "</div>"
+        '<div class="card">'
+        "<h2>Regioni di decisione (teacher vs MLP)</h2>"
+        f"{_figura_html(fig_regioni, 'Regioni di decisione su sistolica × glicemia', 'Heatmap non disponibile: servono dataset di test e artifact MLP.')}"
+        "</div>"
+        "</section>"
+    )
+
+
+def _pannello_training(
+    report: Optional[Dict[str, Any]],
+    avviso_report: Optional[str],
+) -> str:
+    """Vista 4: curve loss, confronto grid, gradient check, architettura."""
+    if avviso_report or not isinstance(report, dict):
+        return (
+            '<section class="tab-panel" data-tab="training">'
+            f'<div class="avviso">{html.escape(avviso_report or "Report non disponibile")}</div>'
+            '<p class="segnaposto">Eseguire python training/train_model.py --build-ml '
+            "per generare il report con le metriche.</p>"
+            "</section>"
+        )
+    try:
+        import _figure  # lazy: matplotlib non serve se il report manca
+    except Exception as exc:
+        print(f"Errore durante l'import di _figure: {exc}", file=sys.stderr)
+        _figure = None
+
+    fig_loss = _figure.figura_loss_curve(report) if _figure is not None else None
+    config = report.get("config_migliore") or {}
+    fig_arch = (
+        _figure.figura_architettura(config.get("n_hidden"))
+        if _figure is not None
+        else None
+    )
+
+    # Confronto grid: le 6 configurazioni ufficiali (config.GRID). Il loss_val
+    # del punto di scelta non è registrato nel report corrente -> colonna "—"
+    # e messaggio esplicito (la modifica di train_model.py è fuori scope V3).
+    righe_grid = "".join(
+        f"<tr><td>{c.get('n_hidden')}</td><td>{c.get('lr')}</td>"
+        f"<td>{c.get('batch_size')}</td><td>{c.get('epoche')}</td><td>—</td></tr>"
+        for c in GRID
+    )
+    grid_html = (
+        '<div class="card">'
+        "<h2>Confronto grid (6 configurazioni)</h2>"
+        '<table class="tabella-live"><thead><tr><th>Hidden</th><th>LR</th>'
+        "<th>Batch</th><th>Epoche</th><th>Loss val (punto di scelta)</th></tr></thead>"
+        f"<tbody>{righe_grid}</tbody></table>"
+        '<p class="nota">Il loss_val per configurazione non è registrato nel '
+        "report corrente: la registrazione del confronto grid è fuori scope "
+        "della Fase V3 (richiederebbe una modifica a training/train_model.py).</p>"
+        "</div>"
+    )
+
+    return (
+        '<section class="tab-panel" data-tab="training">'
+        '<div class="card">'
+        "<h2>Curve di loss — config migliore</h2>"
+        f"{_figura_html(fig_loss, 'Loss train/val della config migliore', 'Curve di loss non disponibili nel report.')}"
+        "</div>"
+        f"{grid_html}"
+        '<div class="card">'
+        "<h2>Gradient check</h2>"
+        '<p><span class="badge-deterministico">Gradient check ~1e-10</span> '
+        "verificato dal test automatico <code>tests/test_mlp.py</code> "
+        "(errore massimo relativo &lt; 2e-5).</p>"
+        "</div>"
+        '<div class="card">'
+        "<h2>Architettura dell'MLP</h2>"
+        f"{_figura_html(fig_arch, 'Architettura: input 6 → hidden ReLU → softmax 3', 'Diagramma non disponibile.')}"
+        "</div>"
+        "</section>"
+    )
+
+
 def genera_html(
     analisi: List[Dict[str, Any]],
     notifiche: List[Dict[str, Any]],
     avviso: Optional[str] = None,
     metadati: Optional[Dict[str, Any]] = None,
     avviso_metadati: Optional[str] = None,
+    report: Optional[Dict[str, Any]] = None,
+    avviso_report: Optional[str] = None,
 ) -> str:
     """Costruisce il documento HTML completo (tabella Live server-side)."""
     timestamp_notifiche = {n.get("timestamp") for n in notifiche}
@@ -753,6 +1038,10 @@ def genera_html(
                 '<div id="flusso-decisionale"></div>'
                 "</div></section>"
             )
+        elif chiave == "teacher":
+            pannelli.append(_pannello_distillazione(report, avviso_report))
+        elif chiave == "training":
+            pannelli.append(_pannello_training(report, avviso_report))
         elif chiave == "riproducibilita":
             pannelli.append(_pannello_riproducibilita(metadati, avviso_metadati))
         else:
@@ -801,7 +1090,7 @@ def genera_html(
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Genera la dashboard HTML statica del sistema supervised (Fase V2)"
+        description="Genera la dashboard HTML statica del sistema supervised (Fase V3)"
     )
     parser.add_argument(
         "--out",
@@ -823,6 +1112,13 @@ def build_parser() -> argparse.ArgumentParser:
         type=Path,
         default=METADATI_DEFAULT,
         help=f"percorso di metadati.json (default: {METADATI_DEFAULT})",
+    )
+    parser.add_argument(
+        "--report-path",
+        dest="report_path",
+        type=Path,
+        default=REPORT_DEFAULT,
+        help=f"percorso di report.json (default: {REPORT_DEFAULT})",
     )
     parser.add_argument(
         "--serve",
@@ -900,12 +1196,15 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     db_path = Path(args.db_path)
     out_path = Path(args.out_path)
     metadati_path = Path(args.metadati_path)
+    report_path = Path(args.report_path)
 
     try:
         analisi, notifiche, avviso = _leggi_dati(db_path)
         metadati, avviso_metadati = _leggi_metadati(metadati_path)
+        report, avviso_report = _leggi_report(report_path)
         documento = genera_html(
-            analisi, notifiche, avviso, metadati, avviso_metadati
+            analisi, notifiche, avviso, metadati, avviso_metadati,
+            report, avviso_report,
         )
     except Exception as exc:  # ultima rete di sicurezza: mai traceback finale
         print(f"Errore durante la generazione della dashboard: {exc}", file=sys.stderr)

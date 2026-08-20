@@ -1,4 +1,4 @@
-"""tests/test_dashboard.py — Guard e test della dashboard (Fase V1 + V2).
+"""tests/test_dashboard.py — Guard e test della dashboard (Fase V1 + V2 + V3).
 
 Verifica che:
 - il runtime (src/, training/, main.py) non importi matplotlib né il tool;
@@ -7,12 +7,15 @@ Verifica che:
 - la Vista 6 (Riproducibilità) mostri seed/split/hash da metadati.json;
 - la Vista 2 (Flusso decisionale) incorpori il JSON dei record con i
   percorsi corretti e la struttura JS del flusso;
-- l'endpoint /api/analisi risponda con il JSON dei record.
+- l'endpoint /api/analisi risponda con il JSON dei record (200 e 500);
+- le viste 3-4 (figure matplotlib) degradino a segnaposto senza matplotlib
+  e mostrino figure base64 + numeri da report.json con matplotlib.
 
 Nessuna dipendenza da matplotlib: tutto gira con stdlib + numpy.
 """
 
 import json
+import os
 import subprocess
 import sys
 import tempfile
@@ -25,6 +28,15 @@ sys.path.insert(0, str(TOOLS_DIR))
 
 import genera_dashboard  # noqa: E402
 from telemedicina_supervised.database.analisi_db import AnalisiDatabase  # noqa: E402
+
+
+def _matplotlib_disponibile() -> bool:
+    try:
+        import matplotlib  # noqa: F401
+
+        return True
+    except Exception:
+        return False
 
 
 def _crea_db_con_casi(db_path: Path) -> None:
@@ -273,6 +285,13 @@ class TestVista6Riproducibilita(unittest.TestCase):
             )
             html_doc = out_path.read_text(encoding="utf-8")
             self.assertIn("Report deterministico", html_doc)
+            # Etichette e valori espliciti della Vista 6 (nota oracle V2).
+            self.assertIn("Seed base", html_doc)
+            self.assertIn(">7<", html_doc)  # seed_base del metadati finto
+            self.assertIn("Split del dataset", html_doc)
+            self.assertIn("Hash di provenienza", html_doc)
+            for etichetta in ("Train", "Validazione", "Test"):
+                self.assertIn(etichetta, html_doc)
             self.assertIn("111", html_doc)
             self.assertIn("222", html_doc)
             self.assertIn("333", html_doc)
@@ -467,6 +486,130 @@ class TestApiAnalisi(unittest.TestCase):
                 server.shutdown()
                 server.server_close()
                 thread.join(timeout=5)
+
+    def test_api_analisi_errore_500(self):
+        # Ramo 500: la lettura del DB fallisce -> risposta JSON con "errore".
+        # _leggi_dati degrada internamente quasi tutti gli errori, quindi il
+        # ramo 500 è difensivo: lo si forza con un mock per verificare il
+        # contratto HTTP (500 + corpo JSON).
+        import http.server
+        import threading
+        import urllib.error
+        import urllib.request
+        from unittest import mock
+
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            db_path = tmp_path / "analisi.db"
+            _crea_db_con_casi(db_path)
+            handler = genera_dashboard.crea_handler(db_path, tmp_path)
+            server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), handler)
+            thread = threading.Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            try:
+                porta = server.server_address[1]
+                with mock.patch.object(
+                    genera_dashboard,
+                    "_leggi_dati",
+                    side_effect=RuntimeError("lettura fallita"),
+                ):
+                    with self.assertRaises(urllib.error.HTTPError) as ctx:
+                        urllib.request.urlopen(
+                            f"http://127.0.0.1:{porta}/api/analisi", timeout=5
+                        )
+                self.assertEqual(ctx.exception.code, 500)
+                corpo = json.loads(ctx.exception.read().decode("utf-8"))
+                self.assertIn("errore", corpo)
+            finally:
+                server.shutdown()
+                server.server_close()
+                thread.join(timeout=5)
+
+
+class TestFigure(unittest.TestCase):
+    def test_placeholder_senza_matplotlib(self):
+        # Subprocess con matplotlib bloccato (modulo finto che alza
+        # ImportError): le viste 3-4 degradano a segnaposto, mai un crash.
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            (tmp_path / "matplotlib.py").write_text(
+                "raise ImportError('matplotlib bloccato per il test')\n",
+                encoding="utf-8",
+            )
+            db_path = tmp_path / "analisi.db"
+            out_path = tmp_path / "dash.html"
+            _crea_db_con_casi(db_path)
+            env = dict(os.environ)
+            env["PYTHONPATH"] = str(tmp_path) + os.pathsep + env.get("PYTHONPATH", "")
+            risultato = subprocess.run(
+                [
+                    sys.executable,
+                    str(TOOLS_DIR / "genera_dashboard.py"),
+                    "--db-path",
+                    str(db_path),
+                    "--out",
+                    str(out_path),
+                ],
+                cwd=str(tmp_path),
+                capture_output=True,
+                text=True,
+                env=env,
+            )
+            self.assertEqual(risultato.returncode, 0, risultato.stderr)
+            html_doc = out_path.read_text(encoding="utf-8")
+            # Nessuna figura base64, ma i pannelli esistono con messaggio.
+            self.assertNotIn("data:image/png;base64,", html_doc)
+            self.assertIn("Knowledge distillation", html_doc)
+            self.assertIn("Curve di loss", html_doc)
+            self.assertIn("non disponibile", html_doc)
+
+    @unittest.skipUnless(
+        _matplotlib_disponibile(), "matplotlib non installato"
+    )
+    def test_figure_con_matplotlib(self):
+        # Con matplotlib: figure base64 presenti e numeri del banner letti
+        # dal report finto (--report-path), mai hardcoded.
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            db_path = tmp_path / "analisi.db"
+            out_path = tmp_path / "dash.html"
+            report_path = tmp_path / "report.json"
+            _crea_db_con_casi(db_path)
+            report_path.write_text(
+                json.dumps({
+                    "config_migliore": {
+                        "n_hidden": 32, "lr": 0.05, "batch_size": 32, "epoche": 25,
+                    },
+                    "loss_train_finale": [0.5 - i * 0.01 for i in range(25)],
+                    "loss_val_finale": [0.55 - i * 0.01 for i in range(25)],
+                    "metriche_test_congelato": {
+                        "accuracy": 0.1234,
+                        "kappa_cohen": 0.5678,
+                        "per_classe": {"2": {"recall": 0.9999}},
+                        "matrice_confusione": [[10, 0, 0], [0, 10, 0], [0, 0, 10]],
+                        "sicurezza": {"recall_alto": 0.9999},
+                    },
+                    "metriche_test_no_buffer": {"accuracy": 0.4321},
+                    "analisi_errori_distanza": {"n_errori": 5},
+                }),
+                encoding="utf-8",
+            )
+            self.assertEqual(
+                genera_dashboard.main([
+                    "--db-path", str(db_path),
+                    "--out", str(out_path),
+                    "--report-path", str(report_path),
+                ]),
+                0,
+            )
+            html_doc = out_path.read_text(encoding="utf-8")
+            self.assertIn("data:image/png;base64,", html_doc)
+            # Numeri del banner dal report finto (formattati a 4 decimali).
+            self.assertIn("0.1234", html_doc)
+            self.assertIn("0.4321", html_doc)
+            self.assertIn("0.5678", html_doc)
+            self.assertIn("0.9999", html_doc)
+            self.assertIn("Gradient check ~1e-10", html_doc)
 
 
 if __name__ == "__main__":
