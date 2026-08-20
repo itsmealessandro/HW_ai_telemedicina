@@ -2,8 +2,8 @@
 
 Knowledge distillation di un teacher rule-based in un MLP numpy, con safety
 gate deterministico a precedenza assoluta, persistenza SQLite e notifiche
-per casi critici. **Stato: Fasi 0-7 complete** (109/109 test, regressione
-legacy 14/14).
+per casi critici. **Stato: Fasi 0-7 complete** (127/127 test, regressione
+legacy 14/14; dashboard di visualizzazione completa V1-V4).
 
 Vincoli di progetto: solo numpy + standard library (nessuna dipendenza
 nuova); tutte le soglie cliniche vivono SOLO in
@@ -102,7 +102,41 @@ errore su stderr con exit code 1.
   valutato UNA sola volta.
 - Report deterministico in `data/models/report.json`.
 
-## 5. Risultati (report.json, seed 41)
+## 6. Visualizzazione (dashboard, V1-V4)
+
+`tools/genera_dashboard.py` genera un HTML autonomo (CSS/JS inline, nessuna
+richiesta di rete) con 6 viste che legano la dashboard agli aspetti IA del
+progetto:
+
+1. **Analisi Live** — tabella delle analisi da SQLite (sola lettura) con
+   badge (MLP / GATE / FALLBACK / NOTIFICA) e pulsante "Aggiorna" via
+   `GET /api/analisi` (solo con `--serve`).
+2. **Flusso decisionale** — percorso del caso: safety gate → MLP → soglia di
+   incertezza → regola `max(rule-based, MLP)`, con i valori reali dai
+   metadati (motivo del fallback incluso).
+3. **Teacher vs MLP** — knowledge distillation: banner metriche da
+   `report.json`, matrice di confusione, scatter degli errori (colore =
+   distanza dalle soglie, riuso di `training.metrics`) e regioni di decisione
+   teacher vs MLP affiancate su sistolica × glicemia.
+4. **Training** — curve di loss con early stopping (pazienza da config),
+   confronto grid (6 config), gradient check e architettura dell'MLP.
+5. **Incertezza** — istogramma della confidenza softmax sul test congelato
+   (soglia `SOGLIA_INCERTEZZA` da config evidenziata, mai literal),
+   contatori di sistema (casi critici del test, override di sicurezza,
+   notifiche dal DB) e tabella dei mancati dell'MLP **ricalcolata** sul test
+   congelato (pred MLP vs label, casi `alto` non predetti `alto`). Il
+   richiamo di sistema sui critici è **1.0 per costruzione** (safety gate a
+   precedenza assoluta): testo esplicito, non figura.
+6. **Riproducibilità** — seed base, split congelati e hash di provenienza da
+   `metadati.json`.
+
+Vincoli rispettati: matplotlib SOLO in `tools/` (import lazy, mai nel
+runtime; `requirements_dashboard.txt` come dipendenza dev); metriche
+dichiarate lette da `report.json` (mai ricalcolate né hardcoded); soglie
+cliniche mai duplicate (riuso di `training.metrics` e
+`training.teacher_rules`); DB in sola lettura; nessuna richiesta di rete.
+
+## 7. Risultati (report.json, seed 41)
 
 | Metrica | Valore |
 |---|---|
