@@ -1,10 +1,15 @@
 #!/usr/bin/env python3
-"""tools/genera_dashboard.py — Dashboard HTML statica del sistema supervised (Fase V1).
+"""tools/genera_dashboard.py — Dashboard HTML statica del sistema supervised (Fase V2).
 
 Genera un file HTML autonomo (CSS e JS inline, nessun CDN, nessuna richiesta
-di rete) con la vista "1. Analisi Live": tabella delle analisi da
-``analisi.db`` con badge distintivi (MLP / GATE / FALLBACK / NOTIFICA),
-banner didattico obbligatorio e 6 tab (le viste 2-6 sono segnaposto).
+di rete) con:
+  - vista "1. Analisi Live": tabella delle analisi da ``analisi.db`` con
+    badge distintivi (MLP / GATE / FALLBACK / NOTIFICA) e pulsante
+    "Aggiorna" (funziona solo con --serve, via GET /api/analisi);
+  - vista "2. Flusso decisionale": diagramma verticale del caso selezionato
+    (click su una riga della Live), con i valori reali dai metadati;
+  - vista "6. Riproducibilità": seed, split e hash da ``metadati.json``;
+  - banner didattico obbligatorio e 6 tab (le viste 3-5 sono segnaposto).
 
 Solo stdlib in questa fase: matplotlib NON viene importato (le figure
 arriveranno nelle fasi successive, vedi ``requirements_dashboard.txt``).
@@ -13,7 +18,9 @@ Uso:
     python tools/genera_dashboard.py                  # build statico
     python tools/genera_dashboard.py --out OUT        # output custom
     python tools/genera_dashboard.py --db-path DB     # database custom
+    python tools/genera_dashboard.py --metadati-path M  # metadati custom
     python tools/genera_dashboard.py --serve          # build + http.server
+                                                     # (+ GET /api/analisi)
 
 Il tool è eseguibile da qualsiasi CWD: i percorsi di default (DB e output)
 sono derivati da ``__file__``, non dalla directory corrente.
@@ -21,6 +28,7 @@ sono derivati da ``__file__``, non dalla directory corrente.
 
 import argparse
 import html
+import json
 import os
 import sys
 from pathlib import Path
@@ -30,11 +38,16 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 SRC_DIR = Path(__file__).resolve().parent.parent / "src"
 sys.path.insert(0, str(SRC_DIR))
 
-from telemedicina_supervised.config import DB_PATH  # noqa: E402
+from telemedicina_supervised.config import (  # noqa: E402
+    DATA_PROCESSED_DIR,
+    DB_PATH,
+    SOGLIA_INCERTEZZA,
+)
 from telemedicina_supervised.database.analisi_db import AnalisiDatabase  # noqa: E402
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 OUTPUT_DEFAULT = PROJECT_ROOT / "data" / "dashboard.html"
+METADATI_DEFAULT = DATA_PROCESSED_DIR / "metadati.json"
 
 BANNER = (
     "Dati sintetici: questa dashboard mostra esempi generati artificialmente, "
@@ -79,11 +92,30 @@ def _badge_per_riga(metadati: Dict[str, Any]) -> List[str]:
         badge.append("mlp")
     if metadati.get("fallback") is True:
         motivo = metadati.get("motivo_fallback")
-        if isinstance(motivo, str) and motivo.startswith("safety gate"):
+        if isinstance(motivo, str) and motivo.lower().startswith("safety gate"):
             badge.append("gate")
         else:
             badge.append("fallback")
     return badge
+
+
+def _percorso(metadati: Dict[str, Any]) -> str:
+    """Classifica il percorso decisionale del caso (stessa logica dei badge).
+
+    - "gate"     -> fallback con motivo "safety gate ..." (il gate ha
+                    bypassato l'MLP: caso critico o input invalido);
+    - "fallback" -> fallback per altra ragione (es. confidenza sotto soglia);
+    - "mlp"      -> modello usato senza fallback;
+    - "regole"   -> baseline rule-based (nessun modello, nessun fallback).
+    """
+    if metadati.get("fallback") is True:
+        motivo = metadati.get("motivo_fallback")
+        if isinstance(motivo, str) and motivo.lower().startswith("safety gate"):
+            return "gate"
+        return "fallback"
+    if metadati.get("modello_usato") is True:
+        return "mlp"
+    return "regole"
 
 
 # ---------------------------------------------------------------------------
@@ -141,7 +173,7 @@ def _riga_html(riga: Dict[str, Any], timestamp_notifiche: set) -> str:
     timestamp = html.escape(str(riga.get("timestamp") or ""))
     messaggio = html.escape(str(riga.get("messaggio") or ""))
     return (
-        "<tr>"
+        f'<tr data-id="{riga.get("id")}">'
         f"<td>{timestamp}</td>"
         f'<td><span class="classe-{html.escape(classe)}">{html.escape(classe)}</span></td>'
         f"<td>{'Sì' if riga.get('allerta_medico') else 'No'}</td>"
@@ -153,6 +185,19 @@ def _riga_html(riga: Dict[str, Any], timestamp_notifiche: set) -> str:
         f"<td>{badge_html}</td>"
         "</tr>"
     )
+
+
+def _record_json(riga: Dict[str, Any], timestamp_notifiche: set) -> Dict[str, Any]:
+    """Record per il JSON incorporato e per /api/analisi.
+
+    Aggiunge il percorso decisionale (``percorso``) e la riga HTML
+    pre-renderizzata (``riga_html``): la logica dei badge e della tabella
+    resta server-side, il JS non la duplica.
+    """
+    record = dict(riga)
+    record["percorso"] = _percorso(riga.get("metadati") or {})
+    record["riga_html"] = _riga_html(riga, timestamp_notifiche)
+    return record
 
 
 # ---------------------------------------------------------------------------
@@ -186,6 +231,23 @@ def _leggi_dati(
     if not analisi:
         return [], [], "Nessuna analisi registrata nel database"
     return analisi, notifiche, None
+
+
+def _leggi_metadati(
+    metadati_path: Path,
+) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
+    """Legge metadati.json (seed, split, hash); (None, avviso) se assente."""
+    if not Path(metadati_path).is_file():
+        return None, (
+            f"Metadati non trovati: {metadati_path}. Eseguire prima "
+            "python training/generate_dataset.py"
+        )
+    try:
+        with open(metadati_path, encoding="utf-8") as file:
+            return json.load(file), None
+    except Exception as exc:
+        print(f"Errore durante la lettura dei metadati: {exc}", file=sys.stderr)
+        return None, f"Errore durante la lettura dei metadati: {exc}"
 
 
 # ---------------------------------------------------------------------------
@@ -325,6 +387,95 @@ main { padding: 24px 32px; }
   margin-right: 4px;
 }
 .segnaposto { color: #6c757d; font-style: italic; }
+.toolbar-live { margin-bottom: 12px; }
+.toolbar-live button {
+  background: #1b3a5b;
+  color: #ffffff;
+  border: none;
+  border-radius: 4px;
+  padding: 6px 14px;
+  font-size: 13px;
+  cursor: pointer;
+}
+.toolbar-live button:hover { background: #2a4d75; }
+#stato-aggiorna { margin-left: 10px; font-size: 12px; color: #6c757d; }
+.tabella-live tbody tr[data-id] { cursor: pointer; }
+.tabella-live tbody tr[data-id]:hover { background: #f0f6fc; }
+.card {
+  background: #ffffff;
+  border-radius: 6px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12);
+  padding: 20px 24px;
+  max-width: 720px;
+}
+.card h2 { margin-top: 0; }
+.card h3 { margin: 18px 0 8px; font-size: 14px; color: #1b3a5b; }
+.badge-deterministico {
+  display: inline-block;
+  background: #2e7d32;
+  color: #ffffff;
+  border-radius: 10px;
+  padding: 3px 10px;
+  font-size: 12px;
+  font-weight: 700;
+}
+.flusso { max-width: 640px; }
+.nodo {
+  border: 1px solid #e3e6ea;
+  border-left: 4px solid #9fb3c8;
+  border-radius: 6px;
+  background: #ffffff;
+  padding: 10px 14px;
+  margin-bottom: 8px;
+}
+.nodo.non-raggiunto { opacity: 0.45; }
+.nodo.stato-gate { border-left-color: #c62828; }
+.nodo.stato-fallback { border-left-color: #ef6c00; }
+.nodo.stato-notifica { border-left-color: #6a1b9a; }
+.nodo.stato-ok { border-left-color: #2e7d32; }
+.nodo.stato-errore { border-left-color: #757575; }
+.nodo-titolo { font-weight: 700; font-size: 13px; color: #1b3a5b; }
+.nodo-esito { font-size: 13px; margin-top: 4px; }
+.barre-prob { margin-top: 6px; }
+.barra-riga { display: flex; align-items: center; margin-bottom: 3px; font-size: 12px; }
+.barra-etichetta { width: 52px; }
+.barra-sfondo {
+  flex: 1;
+  background: #eef1f5;
+  border-radius: 3px;
+  height: 12px;
+  margin: 0 8px;
+  overflow: hidden;
+}
+.barra-piena { height: 100%; background: #1b3a5b; border-radius: 3px; }
+.barra-valore { width: 64px; text-align: right; color: #6c757d; }
+.scala-confidenza { margin-top: 8px; }
+.scala-barra {
+  position: relative;
+  height: 14px;
+  background: linear-gradient(to right, #ef6c00, #f5c6cb 60%, #2e7d32);
+  border-radius: 3px;
+}
+.scala-punto {
+  position: absolute;
+  top: -3px;
+  width: 4px;
+  height: 20px;
+  background: #0d1b2a;
+  border-radius: 2px;
+}
+.scala-soglia {
+  position: absolute;
+  top: -18px;
+  transform: translateX(-50%);
+  font-size: 11px;
+  color: #664d03;
+  background: #fff3cd;
+  border: 1px solid #ffe08a;
+  border-radius: 3px;
+  padding: 0 4px;
+  white-space: nowrap;
+}
 footer {
   padding: 16px 32px;
   font-size: 12px;
@@ -336,27 +487,221 @@ footer {
 def _js() -> str:
     return """\
 (function () {
-  var barra = document.querySelector('.tab-bar');
-  if (!barra) { return; }
-  barra.addEventListener('click', function (evento) {
-    var bottone = evento.target.closest('.tab');
-    if (!bottone) { return; }
-    var bersaglio = bottone.getAttribute('data-tab');
+  var SOGLIA = null;
+  var DATI = { record: [] };
+  var scriptDati = document.getElementById('dati-analisi');
+  if (scriptDati) {
+    try {
+      DATI = JSON.parse(scriptDati.textContent);
+      SOGLIA = DATI.soglia_incertezza;
+    } catch (e) { /* JSON assente o corrotto: dashboard statica */ }
+  }
+
+  function esc(testo) {
+    return String(testo === null || testo === undefined ? '' : testo)
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+  }
+
+  function attivaTab(chiave) {
     document.querySelectorAll('.tab').forEach(function (b) {
-      b.classList.toggle('active', b === bottone);
+      b.classList.toggle('active', b.getAttribute('data-tab') === chiave);
     });
     document.querySelectorAll('.tab-panel').forEach(function (p) {
-      p.classList.toggle('active', p.getAttribute('data-tab') === bersaglio);
+      p.classList.toggle('active', p.getAttribute('data-tab') === chiave);
     });
-  });
+  }
+
+  var barra = document.querySelector('.tab-bar');
+  if (barra) {
+    barra.addEventListener('click', function (evento) {
+      var bottone = evento.target.closest('.tab');
+      if (!bottone) { return; }
+      attivaTab(bottone.getAttribute('data-tab'));
+    });
+  }
+
+  function barreProbabilita(probabilita) {
+    if (!probabilita) { return ''; }
+    var ordine = ['basso', 'medio', 'alto'];
+    var html = '<div class="barre-prob">';
+    ordine.forEach(function (classe) {
+      var valore = probabilita[classe];
+      if (valore === undefined) { return; }
+      var larghezza = Math.max(0, Math.min(100, valore * 100));
+      html += '<div class="barra-riga"><span class="barra-etichetta">' + classe + '</span>'
+        + '<div class="barra-sfondo"><div class="barra-piena" style="width:' + larghezza.toFixed(1) + '%"></div></div>'
+        + '<span class="barra-valore">' + valore.toFixed(4) + '</span></div>';
+    });
+    return html + '</div>';
+  }
+
+  function scalaConfidenza(confidenza) {
+    if (confidenza === null || confidenza === undefined || SOGLIA === null) { return ''; }
+    var pos = Math.max(0, Math.min(100, confidenza * 100));
+    var posSoglia = Math.max(0, Math.min(100, SOGLIA * 100));
+    return '<div class="scala-confidenza"><div class="scala-barra">'
+      + '<div class="scala-punto" style="left:' + pos.toFixed(1) + '%"></div>'
+      + '<div class="scala-soglia" style="left:' + posSoglia.toFixed(1) + '%">soglia ' + SOGLIA + '</div>'
+      + '</div></div>';
+  }
+
+  function nodo(titolo, esito, raggiunto, stato) {
+    var classe = raggiunto ? 'nodo raggiunto' : 'nodo non-raggiunto';
+    if (stato) { classe += ' ' + stato; }
+    return '<div class="' + classe + '"><div class="nodo-titolo">' + titolo + '</div>'
+      + '<div class="nodo-esito">' + esito + '</div></div>';
+  }
+
+  function renderFlusso(record) {
+    var contenitore = document.getElementById('flusso-decisionale');
+    if (!contenitore) { return; }
+    if (!record) {
+      contenitore.innerHTML = '<p class="segnaposto">Seleziona una riga nella tabella "1. Analisi Live".</p>';
+      return;
+    }
+    var m = record.metadati || {};
+    var percorso = record.percorso || 'regole';
+    var errori = record.errori || [];
+    var nodi = [];
+    nodi.push(nodo('1. Input', 'Caso #' + record.id + ' — ' + esc(record.timestamp), true));
+    nodi.push(nodo('2. Validazione',
+      errori.length ? 'Invalido: ' + esc(errori.join('; ')) : 'Valido',
+      true, errori.length ? 'stato-errore' : 'stato-ok'));
+    var gate = percorso === 'gate';
+    nodi.push(nodo('3. Safety gate',
+      gate ? 'Critico → GATE: ' + esc(m.motivo_fallback || '') : 'Non critico',
+      true, gate ? 'stato-gate' : 'stato-ok'));
+    var mlpRaggiunto = percorso === 'mlp' || percorso === 'fallback';
+    nodi.push(nodo('4. MLP softmax',
+      mlpRaggiunto ? 'Classe MLP: ' + esc(m.classe_mlp || '—') + barreProbabilita(record.probabilita)
+        : 'Non raggiunto (gate o regole)',
+      mlpRaggiunto));
+    var sogliaRaggiunta = mlpRaggiunto;
+    var esitoSoglia = '';
+    var conf = m.confidenza;
+    if (sogliaRaggiunta) {
+      if (conf === null || conf === undefined) {
+        esitoSoglia = 'Confidenza non disponibile'
+          + (m.motivo_fallback ? ' (' + esc(m.motivo_fallback) + ')' : '');
+      } else if (SOGLIA === null) {
+        esitoSoglia = 'Confidenza ' + conf.toFixed(4) + ' (soglia non disponibile)';
+      } else if (conf >= SOGLIA) {
+        esitoSoglia = 'Confidenza ' + conf.toFixed(4) + ' ≥ soglia ' + SOGLIA + ' → MLP';
+      } else {
+        esitoSoglia = 'Confidenza ' + conf.toFixed(4) + ' < soglia ' + SOGLIA + ' → fallback rule-based';
+      }
+    }
+    nodi.push(nodo('5. Soglia di incertezza',
+      sogliaRaggiunta ? esitoSoglia + scalaConfidenza(conf) : 'Non raggiunto',
+      sogliaRaggiunta,
+      sogliaRaggiunta && conf !== null && conf !== undefined && conf < SOGLIA ? 'stato-fallback' : ''));
+    var maxRaggiunto = percorso === 'mlp';
+    nodi.push(nodo('6. Regola max(rule, MLP)',
+      maxRaggiunto ? 'Override sicurezza: ' + (m.override_sicurezza ? 'Sì' : 'No') : 'Non raggiunto',
+      maxRaggiunto));
+    nodi.push(nodo('7. Persistenza DB + notifica',
+      record.allerta_medico ? 'Allerta medica: Sì → notifica inviata' : 'Allerta medica: No',
+      true, record.allerta_medico ? 'stato-notifica' : ''));
+    contenitore.innerHTML = nodi.join('');
+  }
+
+  function renderTabella(record) {
+    var tbody = document.querySelector('.tabella-live tbody');
+    if (!tbody) { return; }
+    tbody.innerHTML = record.map(function (r) { return r.riga_html; }).join('');
+  }
+
+  var tbody = document.querySelector('.tabella-live tbody');
+  if (tbody) {
+    tbody.addEventListener('click', function (evento) {
+      var riga = evento.target.closest('tr[data-id]');
+      if (!riga) { return; }
+      var id = parseInt(riga.getAttribute('data-id'), 10);
+      var record = null;
+      for (var i = 0; i < DATI.record.length; i++) {
+        if (DATI.record[i].id === id) { record = DATI.record[i]; break; }
+      }
+      if (record) { renderFlusso(record); attivaTab('flusso'); }
+    });
+  }
+
+  var bottone = document.getElementById('btn-aggiorna');
+  var stato = document.getElementById('stato-aggiorna');
+  if (bottone) {
+    bottone.addEventListener('click', function () {
+      fetch('/api/analisi').then(function (risposta) { return risposta.json(); }).then(function (dati) {
+        DATI = dati;
+        SOGLIA = dati.soglia_incertezza;
+        renderTabella(dati.record);
+        if (stato) { stato.textContent = 'Aggiornato: ' + new Date().toLocaleTimeString(); }
+      }).catch(function () {
+        if (stato) { stato.textContent = 'Aggiornamento disponibile solo con --serve'; }
+      });
+    });
+  }
 })();
 """
+
+
+def _pannello_riproducibilita(
+    metadati: Optional[Dict[str, Any]],
+    avviso_metadati: Optional[str],
+) -> str:
+    """Vista 6: seed, split e hash da metadati.json (degrado grazioso)."""
+    if avviso_metadati or not isinstance(metadati, dict):
+        return (
+            '<section class="tab-panel" data-tab="riproducibilita">'
+            f'<div class="avviso">{html.escape(avviso_metadati or "Metadati non disponibili")}</div>'
+            '<p class="segnaposto">Eseguire python training/generate_dataset.py '
+            "per generare il dataset e i metadati.</p>"
+            "</section>"
+        )
+    blocchi = metadati.get("blocchi") or {}
+    righe_split = "".join(
+        f"<tr><td>{nome}</td><td>{html.escape(str(blocco.get('n', '—')))}</td>"
+        f"<td>{html.escape(str(blocco.get('seed', '—')))}</td></tr>"
+        for nome, chiave, blocco in (
+            ("Train", "train", blocchi.get("train") or {}),
+            ("Validazione", "val", blocchi.get("val") or {}),
+            ("Test", "test", blocchi.get("test") or {}),
+        )
+    )
+    hash_componenti = (
+        ("safety_rules", "hash_safety_rules"),
+        ("synthetic_generator", "hash_synthetic_generator"),
+        ("teacher_rules", "hash_teacher_rules"),
+    )
+    righe_hash = "".join(
+        f"<tr><td>{nome}</td><td><code>"
+        f"{html.escape(str(metadati.get(chiave) or '—'))}</code></td></tr>"
+        for nome, chiave in hash_componenti
+    )
+    return (
+        '<section class="tab-panel" data-tab="riproducibilita">'
+        '<div class="card">'
+        "<h2>Riproducibilità</h2>"
+        '<p><span class="badge-deterministico">Report deterministico '
+        "(stesso seed → stessi numeri)</span></p>"
+        f"<h3>Seed base</h3><p>{html.escape(str(metadati.get('seed_base') or '—'))}</p>"
+        "<h3>Split del dataset</h3>"
+        '<table class="tabella-live"><thead><tr><th>Split</th>'
+        "<th>Record</th><th>Seed</th></tr></thead>"
+        f"<tbody>{righe_split}</tbody></table>"
+        "<h3>Hash di provenienza</h3>"
+        '<table class="tabella-live"><thead><tr><th>Componente</th>'
+        "<th>Hash</th></tr></thead>"
+        f"<tbody>{righe_hash}</tbody></table>"
+        "</div></section>"
+    )
 
 
 def genera_html(
     analisi: List[Dict[str, Any]],
     notifiche: List[Dict[str, Any]],
     avviso: Optional[str] = None,
+    metadati: Optional[Dict[str, Any]] = None,
+    avviso_metadati: Optional[str] = None,
 ) -> str:
     """Costruisce il documento HTML completo (tabella Live server-side)."""
     timestamp_notifiche = {n.get("timestamp") for n in notifiche}
@@ -365,6 +710,13 @@ def genera_html(
     avviso_html = (
         f'<div class="avviso">{html.escape(avviso)}</div>' if avviso else ""
     )
+
+    # JSON incorporato per la Vista 2 (flusso) e per il refresh con --serve.
+    record_json = [_record_json(r, timestamp_notifiche) for r in analisi]
+    dati_json = json.dumps(
+        {"soglia_incertezza": SOGLIA_INCERTEZZA, "record": record_json},
+        ensure_ascii=False,
+    ).replace("</", "<\\/")
 
     bottoni = "".join(
         f'<button type="button" class="tab{" active" if chiave == "live" else ""}"'
@@ -378,6 +730,10 @@ def genera_html(
             pannelli.append(
                 '<section class="tab-panel active" data-tab="live">'
                 f"{avviso_html}"
+                '<div class="toolbar-live">'
+                '<button type="button" id="btn-aggiorna">Aggiorna</button>'
+                '<span id="stato-aggiorna"></span>'
+                "</div>"
                 '<table class="tabella-live">'
                 "<thead><tr>"
                 "<th>Timestamp</th><th>Classe</th><th>Allerta medico</th>"
@@ -387,6 +743,18 @@ def genera_html(
                 f"{corpo_tabella}"
                 "</table></section>"
             )
+        elif chiave == "flusso":
+            pannelli.append(
+                '<section class="tab-panel" data-tab="flusso">'
+                '<div class="card flusso">'
+                "<h2>Flusso decisionale del caso</h2>"
+                '<p class="segnaposto">Seleziona una riga nella tabella '
+                '"1. Analisi Live" per vedere il percorso del caso.</p>'
+                '<div id="flusso-decisionale"></div>'
+                "</div></section>"
+            )
+        elif chiave == "riproducibilita":
+            pannelli.append(_pannello_riproducibilita(metadati, avviso_metadati))
         else:
             pannelli.append(
                 f'<section class="tab-panel" data-tab="{chiave}">'
@@ -418,6 +786,7 @@ def genera_html(
 <nav class="tab-bar">{bottoni}</nav>
 <main>{pannelli_html}</main>
 <footer>Dashboard generata localmente — nessuna richiesta di rete.</footer>
+<script type="application/json" id="dati-analisi">{dati_json}</script>
 <script>
 {_js()}
 </script>
@@ -432,7 +801,7 @@ def genera_html(
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Genera la dashboard HTML statica del sistema supervised (Fase V1)"
+        description="Genera la dashboard HTML statica del sistema supervised (Fase V2)"
     )
     parser.add_argument(
         "--out",
@@ -449,6 +818,13 @@ def build_parser() -> argparse.ArgumentParser:
         help=f"percorso del database SQLite (default: {DB_PATH})",
     )
     parser.add_argument(
+        "--metadati-path",
+        dest="metadati_path",
+        type=Path,
+        default=METADATI_DEFAULT,
+        help=f"percorso di metadati.json (default: {METADATI_DEFAULT})",
+    )
+    parser.add_argument(
         "--serve",
         action="store_true",
         help="dopo il build, serve il file su http://127.0.0.1:8000 (o variabile PORT)",
@@ -456,17 +832,64 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _serve(out_path: Path) -> None:
-    """Serve il file statico generato (solo file, nessuna logica applicativa)."""
-    import functools
+def crea_handler(db_path: Path, directory: Path):
+    """Classe handler http: file statici da ``directory`` + GET /api/analisi.
+
+    L'endpoint /api/analisi restituisce il JSON dei record (stessa struttura
+    del JSON incorporato nell'HTML, inclusi ``percorso`` e ``riga_html``),
+    letto dal DB in sola lettura. Esposta per i test (porta efimera).
+    """
+    import http.server
+
+    class Handler(http.server.SimpleHTTPRequestHandler):
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, directory=str(directory), **kwargs)
+
+        def do_GET(self):
+            if self.path == "/api/analisi":
+                self._api_analisi()
+                return
+            super().do_GET()
+
+        def _api_analisi(self):
+            try:
+                analisi, notifiche, _ = _leggi_dati(db_path)
+                timestamp_notifiche = {n.get("timestamp") for n in notifiche}
+                record = [_record_json(r, timestamp_notifiche) for r in analisi]
+                corpo = json.dumps(
+                    {"soglia_incertezza": SOGLIA_INCERTEZZA, "record": record},
+                    ensure_ascii=False,
+                ).encode("utf-8")
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json; charset=utf-8")
+                self.send_header("Content-Length", str(len(corpo)))
+                self.end_headers()
+                self.wfile.write(corpo)
+            except Exception as exc:
+                corpo = json.dumps(
+                    {"errore": str(exc)}, ensure_ascii=False
+                ).encode("utf-8")
+                self.send_response(500)
+                self.send_header("Content-Type", "application/json; charset=utf-8")
+                self.send_header("Content-Length", str(len(corpo)))
+                self.end_headers()
+                self.wfile.write(corpo)
+
+    return Handler
+
+
+def _serve(out_path: Path, db_path: Path) -> None:
+    """Serve il file generato + endpoint /api/analisi (sola lettura)."""
     import http.server
 
     porta = int(os.environ.get("PORT", "8000"))
-    handler = functools.partial(
-        http.server.SimpleHTTPRequestHandler, directory=str(out_path.parent)
-    )
+    handler = crea_handler(db_path, out_path.parent)
     with http.server.ThreadingHTTPServer(("127.0.0.1", porta), handler) as server:
-        print(f"Dashboard disponibile su http://127.0.0.1:{porta}/{out_path.name}")
+        porta_reale = server.server_address[1]
+        print(
+            f"Dashboard disponibile su http://127.0.0.1:{porta_reale}/{out_path.name}"
+        )
+        print(f"API: http://127.0.0.1:{porta_reale}/api/analisi")
         print("Premere Ctrl+C per fermare il server.")
         server.serve_forever()
 
@@ -476,10 +899,14 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     args = parser.parse_args(argv)
     db_path = Path(args.db_path)
     out_path = Path(args.out_path)
+    metadati_path = Path(args.metadati_path)
 
     try:
         analisi, notifiche, avviso = _leggi_dati(db_path)
-        documento = genera_html(analisi, notifiche, avviso)
+        metadati, avviso_metadati = _leggi_metadati(metadati_path)
+        documento = genera_html(
+            analisi, notifiche, avviso, metadati, avviso_metadati
+        )
     except Exception as exc:  # ultima rete di sicurezza: mai traceback finale
         print(f"Errore durante la generazione della dashboard: {exc}", file=sys.stderr)
         documento = genera_html(
@@ -491,7 +918,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     print(f"Dashboard generata: {out_path}")
 
     if args.serve:
-        _serve(out_path)
+        _serve(out_path, db_path)
     return 0
 
 

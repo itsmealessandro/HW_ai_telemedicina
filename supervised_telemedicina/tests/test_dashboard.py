@@ -1,13 +1,18 @@
-"""tests/test_dashboard.py — Guard e test della dashboard (Fase V1).
+"""tests/test_dashboard.py — Guard e test della dashboard (Fase V1 + V2).
 
 Verifica che:
 - il runtime (src/, training/, main.py) non importi matplotlib né il tool;
 - il tool generi l'HTML con badge corretti, banner, tab e senza link esterni;
-- il degrado grazioso funzioni per DB inesistente e DB vuoto.
+- il degrado grazioso funzioni per DB inesistente, DB vuoto e DB corrotto;
+- la Vista 6 (Riproducibilità) mostri seed/split/hash da metadati.json;
+- la Vista 2 (Flusso decisionale) incorpori il JSON dei record con i
+  percorsi corretti e la struttura JS del flusso;
+- l'endpoint /api/analisi risponda con il JSON dei record.
 
 Nessuna dipendenza da matplotlib: tutto gira con stdlib + numpy.
 """
 
+import json
 import subprocess
 import sys
 import tempfile
@@ -85,6 +90,14 @@ def _riga_per_timestamp(html_doc: str, timestamp: str) -> str:
     if inizio_tr == -1 or fine_tr == -1:
         raise AssertionError(f"riga non delimitata per il timestamp: {timestamp}")
     return html_doc[inizio_tr:fine_tr + len("</tr>")]
+
+
+def _estrai_json(html_doc: str) -> dict:
+    """Estrae e decodifica il JSON incorporato (id="dati-analisi")."""
+    marker = 'id="dati-analisi">'
+    inizio = html_doc.index(marker) + len(marker)
+    fine = html_doc.index("</script>", inizio)
+    return json.loads(html_doc[inizio:fine])
 
 
 class TestGuardRuntime(unittest.TestCase):
@@ -205,8 +218,9 @@ class TestDegrado(unittest.TestCase):
             self.assertEqual(risultato.returncode, 0)
             html_doc = out_path.read_text(encoding="utf-8")
             self.assertIn("Database non trovato", html_doc)
-            # Vista Live vuota: nessun tbody con righe dati.
-            self.assertNotIn("<tbody>", html_doc)
+            # Vista Live vuota: nessuna riga dati cliccabile (il pannello
+            # Riproducibilità può avere un tbody dai metadati reali).
+            self.assertNotIn("data-id=", html_doc)
 
     def test_db_vuoto(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -224,7 +238,235 @@ class TestDegrado(unittest.TestCase):
             )
             html_doc = out_path.read_text(encoding="utf-8")
             self.assertIn("Nessuna analisi registrata nel database", html_doc)
-            self.assertNotIn("<tbody>", html_doc)
+            self.assertNotIn("data-id=", html_doc)
+
+
+class TestVista6Riproducibilita(unittest.TestCase):
+    def test_metadati_finti_mostrati_nel_tab(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            db_path = tmp_path / "analisi.db"
+            out_path = tmp_path / "dash.html"
+            metadati_path = tmp_path / "metadati.json"
+            _crea_db_con_casi(db_path)
+            metadati_path.write_text(
+                json.dumps({
+                    "seed_base": 7,
+                    "blocchi": {
+                        "train": {"seed": 7, "n": 111},
+                        "val": {"seed": 8, "n": 222},
+                        "test": {"seed": 9, "n": 333},
+                    },
+                    "hash_safety_rules": "hashA",
+                    "hash_synthetic_generator": "hashB",
+                    "hash_teacher_rules": "hashC",
+                }),
+                encoding="utf-8",
+            )
+            self.assertEqual(
+                genera_dashboard.main([
+                    "--db-path", str(db_path),
+                    "--out", str(out_path),
+                    "--metadati-path", str(metadati_path),
+                ]),
+                0,
+            )
+            html_doc = out_path.read_text(encoding="utf-8")
+            self.assertIn("Report deterministico", html_doc)
+            self.assertIn("111", html_doc)
+            self.assertIn("222", html_doc)
+            self.assertIn("333", html_doc)
+            self.assertIn("hashA", html_doc)
+            self.assertIn("hashB", html_doc)
+            self.assertIn("hashC", html_doc)
+
+    def test_metadati_mancanti_degrado(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            db_path = tmp_path / "analisi.db"
+            out_path = tmp_path / "dash.html"
+            _crea_db_con_casi(db_path)
+            self.assertEqual(
+                genera_dashboard.main([
+                    "--db-path", str(db_path),
+                    "--out", str(out_path),
+                    "--metadati-path", str(tmp_path / "mancante.json"),
+                ]),
+                0,
+            )
+            html_doc = out_path.read_text(encoding="utf-8")
+            self.assertIn("Metadati non trovati", html_doc)
+
+
+class TestVista2Flusso(unittest.TestCase):
+    def test_json_incorporato_e_struttura_flusso(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            db_path = tmp_path / "analisi.db"
+            out_path = tmp_path / "dash.html"
+            _crea_db_con_casi(db_path)
+            self.assertEqual(
+                genera_dashboard.main(
+                    ["--db-path", str(db_path), "--out", str(out_path)]
+                ),
+                0,
+            )
+            html_doc = out_path.read_text(encoding="utf-8")
+
+            # JSON incorporato valido, con soglia da config e percorsi corretti.
+            dati = _estrai_json(html_doc)
+            self.assertEqual(dati["soglia_incertezza"], 0.6)
+            record = {r["id"]: r for r in dati["record"]}
+            self.assertEqual(record[1]["percorso"], "gate")
+            self.assertEqual(record[2]["percorso"], "mlp")
+            self.assertEqual(record[3]["percorso"], "fallback")
+            self.assertIn(
+                "safety gate: classe critica",
+                record[1]["metadati"]["motivo_fallback"],
+            )
+            self.assertIn("riga_html", record[1])
+
+            # Struttura del flusso presente (contenitore + nodi nel JS).
+            self.assertIn('id="flusso-decisionale"', html_doc)
+            self.assertIn("renderFlusso", html_doc)
+            for nodo in (
+                "Safety gate",
+                "MLP softmax",
+                "Soglia di incertezza",
+                "Regola max(rule, MLP)",
+                "Persistenza DB + notifica",
+            ):
+                self.assertIn(nodo, html_doc)
+
+            # Righe cliccabili (data-id) e pulsante Aggiorna.
+            self.assertIn('data-id="1"', html_doc)
+            self.assertIn('id="btn-aggiorna"', html_doc)
+
+
+class TestCasiAggiuntivi(unittest.TestCase):
+    def test_mlp_fallback_insieme(self):
+        # modello_usato=True E confidenza sotto soglia: badge MLP + FALLBACK,
+        # percorso "fallback" (il flusso mostra MLP raggiunto e soglia fallita).
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            db_path = tmp_path / "analisi.db"
+            out_path = tmp_path / "dash.html"
+            timestamp = "2026-08-19T11:00:00.000000+00:00"
+            db = AnalisiDatabase(db_path)
+            db.inserisci_analisi({
+                "timestamp": timestamp,
+                "classe": "medio",
+                "allerta_medico": False,
+                "errori": [],
+                "probabilita": {"basso": 0.30, "medio": 0.42, "alto": 0.28},
+                "metadati": {
+                    "modello_usato": True,
+                    "classe_mlp": "medio",
+                    "classe_regola": "medio",
+                    "confidenza": 0.42,
+                    "fallback": True,
+                    "motivo_fallback": "confidenza sotto la soglia di incertezza",
+                    "override_sicurezza": False,
+                },
+                "messaggio": "Incertezza",
+            })
+            db.chiudi()
+            self.assertEqual(
+                genera_dashboard.main(
+                    ["--db-path", str(db_path), "--out", str(out_path)]
+                ),
+                0,
+            )
+            html_doc = out_path.read_text(encoding="utf-8")
+            riga = _riga_per_timestamp(html_doc, timestamp)
+            self.assertIn("badge-mlp", riga)
+            self.assertIn("badge-fallback", riga)
+            dati = _estrai_json(html_doc)
+            self.assertEqual(dati["record"][0]["percorso"], "fallback")
+
+    def test_gate_case_insensitive(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            db_path = tmp_path / "analisi.db"
+            out_path = tmp_path / "dash.html"
+            timestamp = "2026-08-19T11:30:00.000000+00:00"
+            db = AnalisiDatabase(db_path)
+            db.inserisci_analisi({
+                "timestamp": timestamp,
+                "classe": "alto",
+                "allerta_medico": True,
+                "errori": [],
+                "probabilita": None,
+                "metadati": {
+                    "modello_usato": False,
+                    "fallback": True,
+                    "motivo_fallback": "SAFETY GATE: classe critica, MLP bypassato",
+                    "override_sicurezza": False,
+                },
+                "messaggio": "Critico",
+            })
+            db.chiudi()
+            self.assertEqual(
+                genera_dashboard.main(
+                    ["--db-path", str(db_path), "--out", str(out_path)]
+                ),
+                0,
+            )
+            html_doc = out_path.read_text(encoding="utf-8")
+            riga = _riga_per_timestamp(html_doc, timestamp)
+            self.assertIn("badge-gate", riga)
+            self.assertNotIn("badge-fallback", riga)
+            dati = _estrai_json(html_doc)
+            self.assertEqual(dati["record"][0]["percorso"], "gate")
+
+    def test_db_corrotto_degrado(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            db_path = tmp_path / "corrotto.db"
+            db_path.write_bytes(b"questo non e' un database sqlite")
+            out_path = tmp_path / "dash.html"
+            self.assertEqual(
+                genera_dashboard.main(
+                    ["--db-path", str(db_path), "--out", str(out_path)]
+                ),
+                0,
+            )
+            html_doc = out_path.read_text(encoding="utf-8")
+            self.assertIn("Errore durante la lettura", html_doc)
+
+
+class TestApiAnalisi(unittest.TestCase):
+    def test_api_analisi_risponde_json(self):
+        import http.server
+        import threading
+        import urllib.request
+
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            db_path = tmp_path / "analisi.db"
+            _crea_db_con_casi(db_path)
+            handler = genera_dashboard.crea_handler(db_path, tmp_path)
+            server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), handler)
+            thread = threading.Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            try:
+                porta = server.server_address[1]
+                with urllib.request.urlopen(
+                    f"http://127.0.0.1:{porta}/api/analisi", timeout=5
+                ) as risposta:
+                    self.assertEqual(risposta.status, 200)
+                    dati = json.loads(risposta.read().decode("utf-8"))
+                self.assertEqual(dati["soglia_incertezza"], 0.6)
+                self.assertEqual(len(dati["record"]), 3)
+                self.assertEqual(
+                    {r["percorso"] for r in dati["record"]},
+                    {"gate", "mlp", "fallback"},
+                )
+                self.assertIn("riga_html", dati["record"][0])
+            finally:
+                server.shutdown()
+                server.server_close()
+                thread.join(timeout=5)
 
 
 if __name__ == "__main__":
