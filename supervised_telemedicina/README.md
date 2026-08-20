@@ -11,7 +11,8 @@ etichettato dal teacher, training riproducibile, inferenza con fallback
 sicuro e tracciamento di ogni analisi.
 
 > **Stato: tutte le fasi 0-7 complete** (piano in 8 fasi, Fase 8 =
-> documentazione). Suite: **109/109 test OK**; regressione legacy: **14/14**.
+> documentazione). Suite: **127/127 test OK** (incluse le 4 fasi della
+> dashboard di visualizzazione); regressione legacy: **14/14**.
 
 ## Vincolo di progetto
 
@@ -81,6 +82,47 @@ Regressione della suite legacy (dal root del repo):
 ```bash
 cd archive/legacy_qtable_rule_based && python -m tests.test_examples   # 14/14
 ```
+
+## Dashboard di visualizzazione (completa, V1-V4)
+
+Strumento didattico **read-only** che visualizza il sistema supervised in 6
+viste, in un unico file HTML autonomo (CSS/JS inline, nessuna richiesta di
+rete). Generato da `tools/genera_dashboard.py`:
+
+```bash
+python tools/genera_dashboard.py                          # build statico
+python tools/genera_dashboard.py --serve                  # build + http://127.0.0.1:8000
+python tools/genera_dashboard.py --out OUT --db-path DB   # output/database custom
+python tools/genera_dashboard.py --metadati-path M --report-path R --test-path D
+```
+
+Opzioni: `--out` (default `data/dashboard.html`), `--db-path` (default
+`data/analisi.db`), `--metadati-path` (default `data/processed/metadati.json`),
+`--report-path` (default `data/models/report.json`), `--test-path` (directory
+con `X_test.npy`/`y_test.npy`, default `data/processed`), `--serve` (aggiunge
+l'endpoint `GET /api/analisi` per il pulsante "Aggiorna" della vista Live).
+
+Prerequisito opzionale: **matplotlib** (solo per le figure, import lazy) —
+`pip install -r requirements_dashboard.txt`. Senza matplotlib le figure
+diventano segnaposto con messaggio, mai un crash; il runtime (`src/`,
+`training/`, `main.py`) non importa mai matplotlib.
+
+Le 6 viste (tutte implementate, nessun segnaposto):
+
+1. **Analisi Live** — tabella delle analisi dal DB (read-only) con badge
+   MLP / GATE / FALLBACK / NOTIFICA.
+2. **Flusso decisionale** — percorso del caso (safety gate → MLP → soglia di
+   incertezza → regola max), con i valori reali dai metadati.
+3. **Teacher vs MLP** — distillation: banner metriche, matrice di confusione,
+   scatter degli errori e regioni di decisione affiancate.
+4. **Training** — curve di loss, confronto grid, gradient check, architettura.
+5. **Incertezza** — istogramma della confidenza softmax (soglia da config),
+   contatori di sistema e tabella dei mancati dell'MLP ricalcolata.
+6. **Riproducibilità** — seed, split e hash di provenienza.
+
+Tutte le metriche dichiarate sono lette da `data/models/report.json` (mai
+ricalcolate né hardcoded); le soglie cliniche non sono mai duplicate (riuso
+di `training.metrics` e `training.teacher_rules`).
 
 ## Riproducibilità
 

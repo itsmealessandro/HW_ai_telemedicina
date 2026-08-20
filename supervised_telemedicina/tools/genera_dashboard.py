@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""tools/genera_dashboard.py — Dashboard HTML statica del sistema supervised (Fase V3).
+"""tools/genera_dashboard.py — Dashboard HTML statica del sistema supervised (Fase V4: completa).
 
 Genera un file HTML autonomo (CSS e JS inline, nessun CDN, nessuna richiesta
 di rete) con:
@@ -13,8 +13,11 @@ di rete) con:
     matplotlib incorporate come base64, da ``report.json`` e dati congelati);
   - vista "4. Training": curve loss, confronto grid, gradient check e
     architettura dell'MLP;
+  - vista "5. Incertezza": istogramma della confidenza softmax (soglia da
+    config), contatori di sistema (casi critici, override, notifiche) e
+    tabella dei mancati dell'MLP ricalcolata sul test congelato;
   - vista "6. Riproducibilità": seed, split e hash da ``metadati.json``;
-  - banner didattico obbligatorio e 6 tab (la vista 5 è segnaposto).
+  - banner didattico obbligatorio e 6 tab tutti implementati.
 
 matplotlib è importato LAZY (via ``tools/_figure.py``): senza la dipendenza
 dev le figure diventano segnaposto con messaggio, mai un crash.
@@ -25,6 +28,7 @@ Uso:
     python tools/genera_dashboard.py --db-path DB     # database custom
     python tools/genera_dashboard.py --metadati-path M  # metadati custom
     python tools/genera_dashboard.py --report-path R  # report custom
+    python tools/genera_dashboard.py --test-path D    # dir con X_test/y_test
     python tools/genera_dashboard.py --serve          # build + http.server
                                                      # (+ GET /api/analisi)
 
@@ -792,14 +796,21 @@ def _figura_html(base64_png: Optional[str], didascalia: str, fallback: str) -> s
     return f'<p class="segnaposto">{html.escape(fallback)}</p>'
 
 
-def _carica_test_e_modello() -> Tuple[Optional[Any], Optional[Any], Optional[Any], Optional[str]]:
-    """(X_test, y_test, modello) con degrado grazioso; modello espone .scaler."""
+def _carica_test_e_modello(
+    test_dir: Optional[Path] = None,
+) -> Tuple[Optional[Any], Optional[Any], Optional[Any], Optional[str]]:
+    """(X_test, y_test, modello) con degrado grazioso; modello espone .scaler.
+
+    ``test_dir`` (default: DATA_PROCESSED_DIR) è la directory con X_test.npy
+    e y_test.npy — parametrizzata per i test con dataset finto.
+    """
     try:
         import numpy as np
         from telemedicina_supervised.ml.mlp import MLP
 
-        X_test = np.load(DATA_PROCESSED_DIR / "X_test.npy")
-        y_test = np.load(DATA_PROCESSED_DIR / "y_test.npy")
+        dir_dati = test_dir or DATA_PROCESSED_DIR
+        X_test = np.load(dir_dati / "X_test.npy")
+        y_test = np.load(dir_dati / "y_test.npy")
         modello = MLP.carica(ARTIFACT_DEFAULT)
         if modello.scaler is None:
             return None, None, None, (
@@ -818,6 +829,7 @@ def _carica_test_e_modello() -> Tuple[Optional[Any], Optional[Any], Optional[Any
 def _pannello_distillazione(
     report: Optional[Dict[str, Any]],
     avviso_report: Optional[str],
+    test_dir: Optional[Path] = None,
 ) -> str:
     """Vista 3: teacher vs MLP (banner metriche, confusione, scatter, regioni).
 
@@ -873,7 +885,7 @@ def _pannello_distillazione(
         if _figure is not None and matrice
         else None
     )
-    X_test, y_test, modello, avviso_dati = _carica_test_e_modello()
+    X_test, y_test, modello, avviso_dati = _carica_test_e_modello(test_dir)
     fig_scatter = None
     fig_regioni = None
     if _figure is not None and modello is not None and X_test is not None and y_test is not None:
@@ -979,6 +991,153 @@ def _pannello_training(
     )
 
 
+def _pannello_incertezza(
+    report: Optional[Dict[str, Any]],
+    avviso_report: Optional[str],
+    notifiche: List[Dict[str, Any]],
+    test_dir: Optional[Path] = None,
+) -> str:
+    """Vista 5: zona di incertezza e sicurezza.
+
+    - Istogramma della confidenza softmax sul test congelato (figura).
+    - Contatori di sistema: casi critici del test (classe ``alto``) e override
+      di sicurezza LETTI da report.json; notifiche totali dal DB (read_only).
+    - Tabella dei mancati dell'MLP RICALCOLATA sul test congelato (pred MLP
+      vs label, casi ``alto`` non predetti ``alto``): il conteggio mostrato è
+      quello reale, non un valore atteso.
+    - Il richiamo di sistema sui critici è 1.0 per costruzione (safety gate
+      a precedenza assoluta): testo esplicito, non figura.
+    """
+    if avviso_report or not isinstance(report, dict):
+        return (
+            '<section class="tab-panel" data-tab="incertezza">'
+            f'<div class="avviso">{html.escape(avviso_report or "Report non disponibile")}</div>'
+            '<p class="segnaposto">Eseguire python training/train_model.py --build-ml '
+            "per generare il report con le metriche.</p>"
+            "</section>"
+        )
+
+    congelato = report.get("metriche_test_congelato") or {}
+    sicurezza = congelato.get("sicurezza") or {}
+    distribuzione = report.get("distribuzione_classi") or {}
+    test_distr = distribuzione.get("test") or {}
+    # Chiavi della distribuzione per indice ("2") o per nome ("alto").
+    critici = test_distr.get("2", test_distr.get("alto"))
+
+    def _num(valore: Any, decimali: int = 4) -> str:
+        return f"{valore:.{decimali}f}" if isinstance(valore, (int, float)) else "—"
+
+    override = report.get("override_sicurezza")
+    nota_override = ""
+    if override is None:
+        override = 0
+        nota_override = (
+            '<p class="nota">Override di sicurezza: non registrato nel report '
+            "(il runtime lo traccia in SQLite, non nel report di training).</p>"
+        )
+    notifiche_totali = len(notifiche)
+
+    metriche = (
+        '<div class="metriche-grid">'
+        f'<div class="metriche-card"><span class="metriche-valore">{_num(critici, 0)}</span>'
+        '<span class="metriche-etichetta">Casi critici nel test (classe alto)</span></div>'
+        f'<div class="metriche-card"><span class="metriche-valore">{_num(override, 0)}</span>'
+        '<span class="metriche-etichetta">Override di sicurezza</span></div>'
+        f'<div class="metriche-card"><span class="metriche-valore">{notifiche_totali}</span>'
+        '<span class="metriche-etichetta">Notifiche totali (DB)</span></div>'
+        "</div>"
+        f"{nota_override}"
+        '<p class="nota"><strong>Richiamo di sistema sui casi critici = 1.0 '
+        "per costruzione</strong> — il safety gate non lascia mai passare un "
+        "caso 'alto' dall'MLP.</p>"
+    )
+
+    try:
+        import _figure  # lazy: matplotlib non serve se il report manca
+    except Exception as exc:
+        print(f"Errore durante l'import di _figure: {exc}", file=sys.stderr)
+        _figure = None
+
+    X_test, y_test, modello, avviso_dati = _carica_test_e_modello(test_dir)
+
+    fig_istogramma = None
+    if _figure is not None and modello is not None and X_test is not None:
+        fig_istogramma = _figure.figura_istogramma_confidenze(
+            X_test, modello, modello.scaler
+        )
+
+    # Tabella dei mancati: pred MLP vs label, casi 'alto' non predetti 'alto'.
+    # Colonne: indice, sistolica/glicemia (ordine feature da safety_rules),
+    # distanza dalle soglie (riuso di training.metrics).
+    if modello is not None and X_test is not None and y_test is not None:
+        import numpy as np
+        from training.metrics import distanza_dalle_soglie
+
+        y = np.asarray(y_test)
+        pred = modello.predici_etichette(modello.scaler.transform(X_test))
+        indici = np.flatnonzero((y == "alto") & (pred != "alto"))
+        distanze = np.asarray(distanza_dalle_soglie(X_test), dtype=float)
+        # Indici di sistolica/glicemia da FEATURE_ORDER (fonte unica in
+        # tools/_figure.py), con fallback difensivo 0/5.
+        try:
+            i_sist = _figure.FEATURE_ORDER.index("pressione_sistolica")
+            i_glic = _figure.FEATURE_ORDER.index("glicemia")
+        except (AttributeError, ValueError):
+            i_sist, i_glic = 0, 5
+        righe = "".join(
+            "<tr>"
+            f"<td>{int(i)}</td>"
+            f"<td>{float(X_test[i, i_sist]):.1f}</td>"
+            f"<td>{float(X_test[i, i_glic]):.1f}</td>"
+            f"<td>{float(distanze[i]):.3f}</td>"
+            "</tr>"
+            for i in indici
+        )
+        n_mancati = len(indici)
+        tabella = (
+            f'<table class="tabella-live" id="tabella-mancati">'
+            "<thead><tr><th>Indice</th><th>Sistolica</th><th>Glicemia</th>"
+            "<th>Distanza dalle soglie</th></tr></thead>"
+            f"<tbody>{righe}</tbody></table>"
+            '<p class="nota">Mancati ricalcolati sul test congelato '
+            "(predizioni MLP vs label del teacher): il conteggio mostrato è "
+            "quello reale del dataset corrente.</p>"
+        )
+    else:
+        n_mancati = None
+        tabella = (
+            '<p class="segnaposto">'
+            f"{html.escape(avviso_dati or 'Dati di test o artifact non disponibili.')}"
+            "</p>"
+        )
+
+    card_mancati = (
+        '<div class="metriche-grid">'
+        f'<div class="metriche-card"><span class="metriche-valore">'
+        f"{_num(n_mancati, 0) if n_mancati is not None else '—'}</span>"
+        '<span class="metriche-etichetta">Mancati dell\'MLP sul test congelato '
+        "(ricalcolati)</span></div></div>"
+    )
+
+    return (
+        '<section class="tab-panel" data-tab="incertezza">'
+        '<div class="card">'
+        "<h2>Zona di incertezza e sicurezza</h2>"
+        f"{metriche}"
+        "</div>"
+        '<div class="card">'
+        "<h2>Confidenza del modello sul test congelato</h2>"
+        f"{_figura_html(fig_istogramma, 'Istogramma della confidenza softmax — soglia di incertezza evidenziata', 'Istogramma non disponibile: servono dataset di test e artifact MLP (e matplotlib per la figura).')}"
+        "</div>"
+        '<div class="card">'
+        "<h2>Mancati dell'MLP (casi critici non riconosciuti)</h2>"
+        f"{card_mancati}"
+        f"{tabella}"
+        "</div>"
+        "</section>"
+    )
+
+
 def genera_html(
     analisi: List[Dict[str, Any]],
     notifiche: List[Dict[str, Any]],
@@ -987,6 +1146,7 @@ def genera_html(
     avviso_metadati: Optional[str] = None,
     report: Optional[Dict[str, Any]] = None,
     avviso_report: Optional[str] = None,
+    test_dir: Optional[Path] = None,
 ) -> str:
     """Costruisce il documento HTML completo (tabella Live server-side)."""
     timestamp_notifiche = {n.get("timestamp") for n in notifiche}
@@ -1039,15 +1199,17 @@ def genera_html(
                 "</div></section>"
             )
         elif chiave == "teacher":
-            pannelli.append(_pannello_distillazione(report, avviso_report))
+            pannelli.append(_pannello_distillazione(report, avviso_report, test_dir))
         elif chiave == "training":
             pannelli.append(_pannello_training(report, avviso_report))
         elif chiave == "riproducibilita":
             pannelli.append(_pannello_riproducibilita(metadati, avviso_metadati))
+        elif chiave == "incertezza":
+            pannelli.append(_pannello_incertezza(report, avviso_report, notifiche, test_dir))
         else:
             pannelli.append(
                 f'<section class="tab-panel" data-tab="{chiave}">'
-                '<p class="segnaposto">In arrivo nelle fasi successive.</p>'
+                '<p class="segnaposto">Pannello non disponibile.</p>'
                 "</section>"
             )
     pannelli_html = "".join(pannelli)
@@ -1090,7 +1252,7 @@ def genera_html(
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Genera la dashboard HTML statica del sistema supervised (Fase V3)"
+        description="Genera la dashboard HTML statica del sistema supervised (Fase V4: dashboard completa)"
     )
     parser.add_argument(
         "--out",
@@ -1119,6 +1281,13 @@ def build_parser() -> argparse.ArgumentParser:
         type=Path,
         default=REPORT_DEFAULT,
         help=f"percorso di report.json (default: {REPORT_DEFAULT})",
+    )
+    parser.add_argument(
+        "--test-path",
+        dest="test_path",
+        type=Path,
+        default=DATA_PROCESSED_DIR,
+        help=f"directory con X_test.npy e y_test.npy (default: {DATA_PROCESSED_DIR})",
     )
     parser.add_argument(
         "--serve",
@@ -1197,6 +1366,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     out_path = Path(args.out_path)
     metadati_path = Path(args.metadati_path)
     report_path = Path(args.report_path)
+    test_path = Path(args.test_path)
 
     try:
         analisi, notifiche, avviso = _leggi_dati(db_path)
@@ -1204,7 +1374,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         report, avviso_report = _leggi_report(report_path)
         documento = genera_html(
             analisi, notifiche, avviso, metadati, avviso_metadati,
-            report, avviso_report,
+            report, avviso_report, test_path,
         )
     except Exception as exc:  # ultima rete di sicurezza: mai traceback finale
         print(f"Errore durante la generazione della dashboard: {exc}", file=sys.stderr)

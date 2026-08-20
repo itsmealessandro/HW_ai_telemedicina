@@ -59,7 +59,34 @@ recall di sistema sui critici è **1.0 per costruzione**.
 - **Transazione atomica** analisi+notifica e **test multi-thread** se il
   sistema diventasse concorrente.
 
-## 4. Conclusione
+## 5. Estensione post-piano: dashboard di visualizzazione (V1-V4)
+
+Dopo la review è stata aggiunta una **dashboard didattica** (piano
+`../.plans/visualizzazione_supervised.md`), completata in 4 fasi:
+
+- **V1**: HTML statico autonomo (nessuna richiesta di rete), 6 tab, vista
+  Live con badge (MLP / GATE / FALLBACK / NOTIFICA) e banner didattico
+  obbligatorio.
+- **V2**: flusso decisionale interattivo del caso, vista Riproducibilità
+  (seed/split/hash), endpoint `GET /api/analisi` (sola lettura) per il
+  pulsante "Aggiorna".
+- **V3**: viste Teacher vs MLP e Training con 5 figure matplotlib (lazy,
+  base64): distillation (banner metriche, confusione, scatter errori, regioni
+  di decisione), curve di loss, grid, gradient check, architettura.
+- **V4**: vista Incertezza (istogramma della confidenza softmax con soglia da
+  config, contatori di sistema, tabella dei mancati dell'MLP ricalcolata sul
+  test congelato), rifiniture e documentazione. **Dashboard completa: 6
+  viste, nessun segnaposto residuo.**
+
+Caratteristiche: strumento **read-only** (DB in sola lettura, nessuna
+scrittura); **matplotlib solo come dipendenza dev**
+(`requirements_dashboard.txt`, import lazy in `tools/`, mai nel runtime);
+metriche dichiarate lette da `data/models/report.json` (fonte unica, mai
+ricalcolate né hardcoded); soglie cliniche mai duplicate (riuso di
+`training.metrics` e `training.teacher_rules`); suite estesa a **127 test**
+(guard matplotlib-in-runtime e link esterni inclusi).
+
+## 6. Conclusione
 
 Il progetto è completo rispetto al piano: distillation riproducibile (seed
 41), safety gate verificato nel codice, persistenza e notifiche su un unico

@@ -341,3 +341,62 @@ def figura_architettura(n_hidden: Optional[int] = None) -> Optional[str]:
         return _png(fig, plt)
     except Exception:
         return None
+
+def figura_istogramma_confidenze(
+    X_test: np.ndarray,
+    modello: Any,
+    scaler: Any,
+) -> Optional[str]:
+    """Istogramma della confidenza softmax sul test congelato.
+
+    Confidenza = max delle probabilità softmax dell'MLP; la soglia di
+    incertezza è letta da ``config.SOGLIA_INCERTEZZA`` (mai literal).
+    La barra della soglia separa la zona "MLP affidabile" (verde) da quella
+    "fallback rule-based" (ambra): sotto soglia il sistema non si fida
+    dell'MLP e ripiega sulle regole.
+    """
+    try:
+        plt = _mpl()
+        if plt is None:
+            return None
+        from telemedicina_supervised.config import SOGLIA_INCERTEZZA
+
+        X_norm = scaler.transform(X_test)
+        prob = (
+            modello.probabilità(X_norm)
+            if hasattr(modello, "probabilità")
+            else modello.probabilita(X_norm)
+        )
+        confidenze = np.asarray(prob).max(axis=1)
+        confidenze = confidenze[np.isfinite(confidenze)]
+
+        fig, ax = plt.subplots(figsize=(8, 4))
+        n, contenitori, patch = ax.hist(
+            confidenze,
+            bins=np.linspace(0.0, 1.0, 51),  # 50 bin su [0, 1]
+            color="#f9a825",
+            edgecolor="#1c1e21",
+            linewidth=0.6,
+        )
+        # Colora le barre in base alla zona rispetto alla soglia: ambra
+        # (fallback) sotto soglia, verde (MLP) sopra.
+        for barra, bin_destro in zip(patch, contenitori[1:]):
+            if bin_destro <= SOGLIA_INCERTEZZA:
+                barra.set_facecolor("#f9a825")
+            else:
+                barra.set_facecolor("#2e7d32")
+        ax.axvline(
+            SOGLIA_INCERTEZZA,
+            color="#c62828",
+            linestyle="--",
+            linewidth=1.4,
+            label=f"Soglia di incertezza = {SOGLIA_INCERTEZZA} (config)",
+        )
+        ax.set_title("Confidenza softmax dell'MLP sul test congelato")
+        ax.set_xlabel("Confidenza (max probabilità softmax)")
+        ax.set_ylabel("Numero di casi")
+        ax.legend(fontsize=8)
+        fig.tight_layout()
+        return _png(fig, plt)
+    except Exception:
+        return None

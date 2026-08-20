@@ -1,4 +1,4 @@
-"""tests/test_dashboard.py — Guard e test della dashboard (Fase V1 + V2 + V3).
+"""tests/test_dashboard.py — Guard e test della dashboard (Fase V1 + V2 + V3 + V4).
 
 Verifica che:
 - il runtime (src/, training/, main.py) non importi matplotlib né il tool;
@@ -9,7 +9,12 @@ Verifica che:
   percorsi corretti e la struttura JS del flusso;
 - l'endpoint /api/analisi risponda con il JSON dei record (200 e 500);
 - le viste 3-4 (figure matplotlib) degradino a segnaposto senza matplotlib
-  e mostrino figure base64 + numeri da report.json con matplotlib.
+  e mostrino figure base64 + numeri da report.json con matplotlib;
+- la Vista 5 (Incertezza) mostri contatori da report.json, il testo di
+  sicurezza "1.0 per costruzione", la tabella dei mancati ricalcolata sul
+  test congelato (anche con dataset finto via --test-path) e l'istogramma
+  della confidenza con matplotlib;
+- nessun segnaposto residuo: i 6 tab sono tutti implementati.
 
 Nessuna dipendenza da matplotlib: tutto gira con stdlib + numpy.
 """
@@ -160,7 +165,7 @@ class TestBuildBadge(unittest.TestCase):
             # Banner didattico obbligatorio.
             self.assertIn("nessuna pretesa diagnostica", html_doc)
 
-            # 6 tab e testo segnaposto.
+            # 6 tab, tutti implementati (nessun segnaposto residuo).
             for etichetta in (
                 "1. Analisi Live",
                 "2. Flusso decisionale",
@@ -170,7 +175,7 @@ class TestBuildBadge(unittest.TestCase):
                 "6. Riproducibilità",
             ):
                 self.assertIn(etichetta, html_doc)
-            self.assertIn("In arrivo nelle fasi successive", html_doc)
+            self.assertNotIn("In arrivo nelle fasi successive", html_doc)
 
             # Badge per riga (estratti dalla riga del timestamp, così i nomi
             # classe CSS non interferiscono con l'assert).
@@ -610,6 +615,161 @@ class TestFigure(unittest.TestCase):
             self.assertIn("0.5678", html_doc)
             self.assertIn("0.9999", html_doc)
             self.assertIn("Gradient check ~1e-10", html_doc)
+
+
+def _valore_metriche(html_doc: str, etichetta: str) -> str:
+    """Valore della metriche-card con l'etichetta data (regex)."""
+    import re
+
+    m = re.search(
+        r'<span class="metriche-valore">([^<]+)</span>'
+        r'<span class="metriche-etichetta">' + re.escape(etichetta) + r"</span>",
+        html_doc,
+    )
+    if not m:
+        raise AssertionError(f"card metriche non trovata: {etichetta}")
+    return m.group(1)
+
+
+class TestVista5Incertezza(unittest.TestCase):
+    """Vista 5: contatori da report.json, testo di sicurezza, tabella mancati.
+
+    La tabella dei mancati è RICALCOLATA sul test congelato (pred MLP vs
+    label): il conteggio atteso è quello reale del dataset, mai un valore
+    fisso. Con --test-path si può puntare a un dataset finto in tmpdir.
+    """
+
+    def _build(
+        self,
+        tmp_path: Path,
+        report_path: Path = None,
+        test_path: Path = None,
+    ) -> str:
+        db_path = tmp_path / "analisi.db"
+        out_path = tmp_path / "dash.html"
+        _crea_db_con_casi(db_path)
+        args = ["--db-path", str(db_path), "--out", str(out_path)]
+        if report_path is not None:
+            args += ["--report-path", str(report_path)]
+        if test_path is not None:
+            args += ["--test-path", str(test_path)]
+        self.assertEqual(genera_dashboard.main(args), 0)
+        return out_path.read_text(encoding="utf-8")
+
+    def test_contenuti_vista5_con_dati_reali(self):
+        # Dati reali (deterministici): contatori da report.json, testo di
+        # sicurezza, tabella mancati con il conteggio REALE ricalcolato.
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            html_doc = self._build(tmp_path)
+
+            self.assertIn("1.0 per costruzione", html_doc)
+            self.assertIn("non registrato nel report", html_doc)
+            self.assertEqual(
+                _valore_metriche(html_doc, "Casi critici nel test (classe alto)"),
+                "7100",
+            )
+            self.assertEqual(
+                _valore_metriche(html_doc, "Override di sicurezza"), "0"
+            )
+            self.assertEqual(
+                _valore_metriche(html_doc, "Notifiche totali (DB)"), "1"
+            )
+
+            # Conteggio reale dei mancati: ricalcolo indipendente nel test.
+            import numpy as np
+            from telemedicina_supervised.ml.mlp import MLP
+
+            X_test = np.load(PROJECT_ROOT / "data" / "processed" / "X_test.npy")
+            y_test = np.load(PROJECT_ROOT / "data" / "processed" / "y_test.npy")
+            modello = MLP.carica(
+                PROJECT_ROOT / "data" / "models" / "mlp_telemedicina.npz"
+            )
+            pred = modello.predici_etichette(modello.scaler.transform(X_test))
+            attesi = int(np.count_nonzero((y_test == "alto") & (pred != "alto")))
+            corpo = html_doc.split('id="tabella-mancati"')[1]
+            righe = corpo.split("<tbody>")[1].split("</tbody>")[0]
+            self.assertEqual(righe.count("<tr>"), attesi)
+            self.assertEqual(
+                _valore_metriche(
+                    html_doc, "Mancati dell'MLP sul test congelato (ricalcolati)"
+                ),
+                str(attesi),
+            )
+
+            # Nessun segnaposto residuo in nessun tab.
+            self.assertNotIn("In arrivo nelle fasi successive", html_doc)
+
+    @unittest.skipUnless(
+        _matplotlib_disponibile(), "matplotlib non installato"
+    )
+    def test_istogramma_confidenze_con_matplotlib(self):
+        # Con matplotlib: 6 figure totali (5 della V3 + istogramma V5) e
+        # didascalia dell'istogramma presente.
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            html_doc = self._build(tmp_path)
+            self.assertEqual(html_doc.count("data:image/png;base64,"), 6)
+            self.assertIn("Istogramma della confidenza", html_doc)
+
+    def test_degrado_vista5_senza_dataset(self):
+        # --test-path vuoto: la tabella mancati degrada, i contatori restano.
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            vuoto = tmp_path / "vuoto"
+            vuoto.mkdir()
+            html_doc = self._build(tmp_path, test_path=vuoto)
+            self.assertIn("Dati di test o artifact non disponibili", html_doc)
+            self.assertNotIn("tabella-mancati", html_doc)
+            self.assertIn("1.0 per costruzione", html_doc)
+            self.assertEqual(
+                _valore_metriche(html_doc, "Casi critici nel test (classe alto)"),
+                "7100",
+            )
+
+    def test_tabella_mancati_con_dataset_finto(self):
+        # Dataset finto in tmpdir (--test-path): 8 casi tutti 'alto' con
+        # valori sani -> l'MLP li predice tutti 'basso' -> 8 mancati reali.
+        import numpy as np
+
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            test_path = tmp_path / "test_finto"
+            test_path.mkdir()
+            np.save(
+                test_path / "X_test.npy",
+                np.full((8, 6), [120.0, 80.0, 75.0, 36.8, 98.0, 95.0]),
+            )
+            np.save(
+                test_path / "y_test.npy",
+                np.array(["alto"] * 8),
+            )
+            report_path = tmp_path / "report.json"
+            report_path.write_text(
+                json.dumps({
+                    "metriche_test_congelato": {},
+                    "distribuzione_classi": {},
+                }),
+                encoding="utf-8",
+            )
+            html_doc = self._build(
+                tmp_path, report_path=report_path, test_path=test_path
+            )
+            corpo = html_doc.split('id="tabella-mancati"')[1]
+            righe = corpo.split("<tbody>")[1].split("</tbody>")[0]
+            self.assertEqual(righe.count("<tr>"), 8)
+            self.assertEqual(
+                _valore_metriche(
+                    html_doc, "Mancati dell'MLP sul test congelato (ricalcolati)"
+                ),
+                "8",
+            )
+            self.assertIn("1.0 per costruzione", html_doc)
+            # Contatori con report finto senza distribuzione: "—".
+            self.assertEqual(
+                _valore_metriche(html_doc, "Casi critici nel test (classe alto)"),
+                "—",
+            )
 
 
 if __name__ == "__main__":
