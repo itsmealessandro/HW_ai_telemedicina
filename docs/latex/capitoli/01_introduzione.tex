@@ -1,0 +1,188 @@
+\chapter{Introduzione: cos'è l'IA e cosa fa questo progetto}\label{cap:introduzione}
+
+% Capitolo 1 — Introduzione. Cos'è l'IA e cosa fa il progetto supervised_telemedicina.
+
+Questo documento spiega, dal basso, il progetto \progetto{}: un sistema di
+intelligenza artificiale per la telemedicina che classifica sei parametri
+vitali in tre classi di rischio. È pensato per chi sa programmare ma non ha
+mai studiato l'IA: useremo spesso analogie con il codice che già conosci e
+ogni concetto teorico sarà subito collegato al codice reale del progetto
+\cite{progetto2026}.
+
+Il progetto sostituisce un'applicazione legacy basata su regole e Q-learning
+(archiviata in \file{archive/legacy\_qtable\_rule\_based/} e mai importata
+dal nuovo runtime) con un percorso di apprendimento supervisionato completo:
+un dataset sintetico etichettato da un sistema a regole, una rete neurale
+addestrata a imitarlo e un \emph{safety gate} deterministico che ha l'ultima
+parola in ogni decisione.
+
+\section{IA, machine learning e deep learning: cosa significano davvero}\label{sec:ia-ml-deep}
+
+I tre termini che si sentono più spesso — intelligenza artificiale, machine
+learning e deep learning — non sono sinonimi: sono tre cerchi concentrici.
+
+\begin{itemize}
+  \item \textbf{L'IA è il campo.} È la disciplina che studia come costruire
+        sistemi capaci di svolgere compiti che, negli esseri umani,
+        richiedono intelligenza: riconoscere un volto, capire una frase,
+        decidere se un paziente è a rischio. È il contenitore più ampio.
+  \item \textbf{Il machine learning è il metodo statistico.} Dentro il campo
+        dell'IA, il ML è l'approccio che non scrive le regole a mano, ma le
+        \emph{impara dai dati}. Da programmatore, la differenza è radicale:
+        nel software tradizionale scrivi \codice{if valore > soglia: ...}; nel
+        ML scrivi un algoritmo che, dato un insieme di esempi, trova da solo
+        la funzione di decisione.
+  \item \textbf{Il deep learning è una famiglia di modelli.} Dentro il ML, il
+        deep learning usa reti neurali con molti strati di trasformazioni.
+        È molto potente su dati complessi (immagini, testo, audio), ma non è
+        l'unico modo di fare ML e non è sempre la scelta giusta.
+\end{itemize}
+
+Un modo sintetico di ricordarlo: \emph{l'IA è il campo, il ML è il metodo
+statistico, il deep learning è una famiglia di modelli}
+\cite{goodfellow2016deep}.
+
+In questo progetto useremo machine learning \emph{supervisionato} con una
+rete neurale piccola (un percettrone multistrato, MLP) scritta da zero in
+numpy. Non è deep learning nel senso di migliaia di strati: è una rete a due
+strati, sufficiente per un problema con sei ingressi e tre classi. Il punto
+del progetto non è la complessità del modello, ma l'intero percorso: dati,
+etichette, training, sicurezza e riproducibilità.
+
+\section{Il problema di questo progetto}\label{sec:problema-progetto}
+
+Il dominio è la \textbf{telemedicina}: il monitoraggio remoto dei pazienti.
+Un dispositivo misura sei parametri vitali:
+
+\begin{itemize}
+  \item pressione sistolica e diastolica (in mmHg);
+  \item frequenza cardiaca (in battiti al minuto);
+  \item temperatura corporea (in gradi Celsius);
+  \item saturazione dell'ossigeno nel sangue (in percentuale);
+  \item glicemia (in mg/dL).
+\end{itemize}
+
+Il sistema deve classificare ogni combinazione di questi sei valori in una
+delle tre classi di rischio: \classe{basso}, \classe{medio} o \classe{alto}.
+È un problema di \textbf{classificazione supervisionata}: abbiamo un insieme
+di esempi in cui l'output atteso è noto (le etichette) e vogliamo una
+funzione che, dato un nuovo input mai visto, produca la classe giusta.
+
+Perché la sicurezza è prioritaria in telemedicina? Perché un errore non è un
+bug innocuo: classificare come \classe{basso} un paziente in crisi può avere
+conseguenze cliniche. Per questo il progetto adotta una regola architetturale
+ferrea: le regole deterministiche di sicurezza hanno \textbf{precedenza
+assoluta} sul modello. Un caso che le regole giudicano critico non passa mai
+dalla rete neurale e non può mai essere declassato. Il modello impara a
+imitare le regole, ma le regole restano il garante finale.
+
+\section{La soluzione in una frase}\label{sec:soluzione-in-una-frase}
+
+La soluzione del progetto si può riassumere in una frase:
+
+\begin{quote}
+Un \emph{teacher} rule-based etichetta un dataset sintetico; un MLP in numpy
+impara ad approssimare il teacher; a runtime un \emph{safety gate}
+deterministico ha precedenza assoluta sul modello.
+\end{quote}
+
+In pratica il percorso è questo:
+
+\begin{enumerate}
+  \item \textbf{Teacher rule-based}: un sistema a regole (if/elif su soglie
+        cliniche) assegna la classe di rischio a ogni combinazione di
+        parametri. È la fonte delle etichette (capitolo \ref{cap:teacher}).
+  \item \textbf{Dataset sintetico}: il teacher etichetta 70\,000 campioni
+        generati artificialmente, congelati in train/val/test
+        (capitolo \ref{cap:dati}).
+  \item \textbf{MLP numpy}: una rete neurale a due strati impara ad
+        approssimare la funzione del teacher (capitoli \ref{cap:reti} e
+        \ref{cap:training}).
+  \item \textbf{Safety gate}: a runtime, le regole di sicurezza vengono
+        applicate prima del modello; il modello interviene solo sui casi che
+        le regole non considerano critici (capitolo \ref{cap:sicurezza}).
+\end{enumerate}
+
+\begin{esempio}{Il flusso in una riga di codice}
+Nel runtime, il metodo \codice{predict} di \codice{SupervisedAgent} applica
+prima \codice{analizza} (le regole di sicurezza) e solo dopo, se il caso non
+è critico, interroga l'MLP. Il codice reale è in
+\file{src/telemedicina\_supervised/agents/supervised\_agent.py}.
+\end{esempio}
+
+\section{Mappa del documento}\label{sec:mappa-documento}
+
+Il documento segue il percorso del progetto, dalla teoria al codice.
+
+\begin{description}
+  \item[\ref{cap:fondamenti} — Fondamenti di machine learning supervisionato:]
+        i concetti base: dati, feature, label, modello come funzione,
+        training e test, generalizzazione.
+  \item[\ref{cap:dati} — I dati:] le sei feature cliniche, il dataset
+        sintetico, lo split congelato e la normalizzazione.
+  \item[\ref{cap:teacher} — Il teacher:] il sistema a regole che produce le
+        etichette, con i suoi vantaggi e limiti.
+  \item[\ref{cap:reti} — Le reti neurali:] come funziona un MLP, dal
+        percettrone alla backpropagation.
+  \item[\ref{cap:training} — Il training:] l'ottimizzazione dei parametri,
+        la loss, la discesa del gradiente e l'early stopping.
+  \item[\ref{cap:valutazione} — La valutazione:] come si misura se il modello
+        funziona: accuracy, precision, recall, kappa.
+  \item[\ref{cap:distillazione} — La distillazione:] il collegamento tra
+        teacher e studente, il cuore del progetto.
+  \item[\ref{cap:sicurezza} — Sicurezza e incertezza:] il safety gate e la
+        soglia di confidenza.
+  \item[\ref{cap:riproducibilita} — Riproducibilità:] seed, split congelati e
+        hash di provenienza.
+  \item[\ref{cap:conclusioni} — Conclusioni:] cosa abbiamo imparato e quali
+        sono i limiti dichiarati.
+\end{description}
+
+\section{Come leggere il codice}\label{sec:come-leggere-codice}
+
+Il codice del progetto è organizzato in quattro aree principali:
+
+\begin{itemize}
+  \item \file{src/telemedicina\_supervised/}: il codice runtime. Contiene le
+        regole di sicurezza (\file{safety/safety\_rules.py}), il modello
+        (\file{ml/}), l'agente (\file{agents/supervised\_agent.py}), i
+        servizi, il database e la configurazione (\file{config.py}).
+  \item \file{training/}: il codice offline. Contiene il teacher
+        (\file{teacher\_rules.py}), il generatore del dataset sintetico
+        (\file{synthetic\_generator.py}), il training
+        (\file{train\_model.py}) e le metriche (\file{metrics.py}).
+  \item \file{tests/}: la suite di test unitari (unittest).
+  \item \file{tools/}: la dashboard di visualizzazione. È l'unico posto in
+        cui è ammesso matplotlib, e solo come strumento di sviluppo: il
+        runtime non lo importa mai.
+\end{itemize}
+
+Per eseguire la suite di test (129 test):
+
+\begin{lstlisting}[caption={Esecuzione della suite di test del progetto}]
+PYTHONPATH=src python -m unittest discover -s tests
+\end{lstlisting}
+
+Le sei feature, nell'ordine ufficiale del contratto
+(\codice{FEATURE\_ORDER} in \file{safety\_rules.py}), sono:
+
+\begin{table}[h]
+\centering
+\caption{Le sei feature del progetto e le loro unità di misura.}
+\label{tab:feature-unita}
+\begin{tabular}{ll}
+\toprule
+\textbf{Feature} & \textbf{Unità di misura} \\
+\midrule
+\codice{pressione\_sistolica} & mmHg \\
+\codice{pressione\_diastolica} & mmHg \\
+\codice{frequenza\_cardiaca} & bpm \\
+\codice{temperatura} & °C \\
+\codice{saturazione\_ossigeno} & \% \\
+\codice{glicemia} & mg/dL \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Nel prossimo capitolo (\ref{cap:fondamenti}) introduciamo i concetti di
+machine learning che servono a capire tutto il resto.

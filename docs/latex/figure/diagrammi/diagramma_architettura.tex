@@ -1,0 +1,12 @@
+% diagramma_architettura.tex — diagramma TikZ (incluso dai capitoli).
+\begin{tikzpicture}[
+    nodo/.style={draw, rounded corners=2pt, minimum height=0.9cm, align=center, font=\small},
+    freccia/.style={-{Stealth[length=2.5mm]}, thick},
+  ]
+  \node[nodo, fill=blue!10] (in) at (0,0) {Input\\6 feature};
+  \node[nodo, fill=green!15] (hid) at (4,0) {Hidden ReLU\\$n$ neuroni};
+  \node[nodo, fill=orange!15] (out) at (8,0) {Softmax\\3 classi};
+  \draw[freccia] (in) -- (hid) node[midway, above, font=\scriptsize] {$W_1, b_1$};
+  \draw[freccia] (hid) -- (out) node[midway, above, font=\scriptsize] {$W_2, b_2$};
+  \node[below=0.35cm of in, font=\scriptsize, align=center] {standardizzazione\\con lo scaler};
+\end{tikzpicture}

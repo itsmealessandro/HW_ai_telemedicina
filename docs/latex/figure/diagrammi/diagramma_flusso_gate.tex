@@ -1,0 +1,20 @@
+% diagramma_flusso_gate.tex — diagramma TikZ (incluso dai capitoli).
+\begin{tikzpicture}[
+    nodo/.style={draw, rounded corners=2pt, minimum height=0.9cm, align=center, font=\small},
+    decisione/.style={diamond, draw, aspect=2.2, align=center, font=\small, inner sep=1pt},
+    freccia/.style={-{Stealth[length=2.5mm]}, thick},
+  ]
+  \node[nodo, fill=blue!10] (par) at (0,0) {Parametri vitali\\6 feature};
+  \node[decisione, fill=yellow!20] (gate) at (3.2,0) {Safety gate\\rule-based};
+  \node[nodo, fill=red!15] (crit) at (6.8,1.6) {Caso critico\\GATE + NOTIFICA};
+  \node[nodo, fill=green!15] (mlp) at (6.8,-1.6) {MLP (softmax)};
+  \node[decisione, fill=yellow!20] (soglia) at (10.2,-1.6) {Confidenza\\$< 0.6$?};
+  \node[nodo, fill=orange!15] (fallback) at (13.6,-2.9) {Fallback\\rule-based};
+  \node[nodo, fill=green!15] (classe) at (13.6,-0.3) {Classe MLP\\+ metadati};
+  \draw[freccia] (par) -- (gate);
+  \draw[freccia] (gate) -- node[above, font=\scriptsize] {critico} (crit);
+  \draw[freccia] (gate) -- node[below, font=\scriptsize] {non critico} (mlp);
+  \draw[freccia] (mlp) -- (soglia);
+  \draw[freccia] (soglia) -- node[right, font=\scriptsize] {sì} (fallback);
+  \draw[freccia] (soglia) -- node[above, font=\scriptsize] {no} (classe);
+\end{tikzpicture}

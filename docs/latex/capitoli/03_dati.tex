@@ -1,0 +1,200 @@
+\chapter{I dati: dal mondo reale al dataset}\label{cap:dati}
+
+% Capitolo 3 — I dati: dal mondo reale al dataset.
+
+Ogni progetto di machine learning comincia dai dati. In questo capitolo
+vediamo le sei feature cliniche del progetto, perché il dataset è sintetico,
+come è stato diviso e congelato, come viene normalizzato e perché tutto
+questo rende il progetto riproducibile \cite{progetto2026}. Le etichette del
+dataset le mette il teacher rule-based, che è l'argomento del capitolo
+\ref{cap:teacher}.
+
+\section{Le sei feature cliniche}\label{sec:sei-feature-cliniche}
+
+Le sei feature sono parametri vitali misurati su un paziente. L'ordine
+ufficiale è fissato dal contratto in \codice{FEATURE\_ORDER} dentro
+\file{src/telemedicina\_supervised/safety/safety\_rules.py}: è l'ordine del
+vettore in ingresso al modello e non va modificato senza aggiornare il
+contratto.
+
+La tabella seguente riporta, per ogni feature, l'unità di misura, il range
+normale e un breve significato clinico. I range normali sono quelli reali
+del progetto, definiti in \codice{RANGE\_NORMALI} in \file{safety\_rules.py}.
+
+\begin{table}[h]
+\centering
+\caption{Le sei feature cliniche: unità, range normale e significato.}
+\label{tab:feature-cliniche}
+\begin{tabular}{llll}
+\toprule
+\textbf{Feature} & \textbf{Unità} & \textbf{Range normale} & \textbf{Significato clinico} \\
+\midrule
+\codice{pressione\_sistolica} & mmHg & 90--140 & pressione massima del cuore \\
+\codice{pressione\_diastolica} & mmHg & 60--90 & pressione minima tra i battiti \\
+\codice{frequenza\_cardiaca} & bpm & 60--100 & battiti al minuto \\
+\codice{temperatura} & °C & 36.0--37.5 & temperatura corporea \\
+\codice{saturazione\_ossigeno} & \% & 95--100 & ossigeno nel sangue \\
+\codice{glicemia} & mg/dL & 70--140 & zucchero nel sangue \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Oltre ai range normali, \file{safety\_rules.py} definisce i \textbf{range
+fisiologici} (i valori "possibili" per un essere umano) e le \textbf{soglie
+critiche e moderate} che determinano la classe di rischio. Un input con un
+valore fuori dal range fisiologico non è un paziente a rischio basso: è una
+misurazione invalida, e il sistema risponde \classe{errore}, mai una classe
+di rischio. Questo è un dettaglio importante: il modello lavora solo su
+input validi.
+
+\section{Perché un dataset sintetico}\label{sec:perche-dataset-sintetico}
+
+Il dataset del progetto è \textbf{sintetico}: non contiene dati reali di
+pazienti, ma campioni generati artificialmente. Le ragioni sono tre.
+
+\begin{enumerate}
+  \item \textbf{Privacy}: i dati sanitari reali sono estremamente sensibili.
+        Un dataset sintetico elimina ogni problema di consenso e
+        anonimizzazione.
+  \item \textbf{Controllo della distribuzione}: possiamo decidere quanti
+        campioni generare per ogni profilo clinico, assicurandoci che tutte
+        le classi siano rappresentate e che le regioni anomale siano
+        sovracampionate.
+  \item \textbf{Riproducibilità}: con un seed fisso, la generazione produce
+        sempre gli stessi dati. Stessi dati, stessi numeri, sempre.
+\end{enumerate}
+
+Come funziona la generazione? Il generatore
+(\file{training/synthetic\_generator.py}) usa una \emph{mixture di profili}:
+ogni profilo rappresenta una condizione clinica (normale, ipertensione,
+tachicardia, febbre, ipossia, ipoglicemia, shock, ecc.) con un peso e, per
+ogni feature, una coppia (media, deviazione standard) di una distribuzione
+gaussiana. Il campionamento avviene in tre passi:
+
+\begin{enumerate}
+  \item si sceglie un profilo con probabilità proporzionale al suo peso;
+  \item si campionano i sei valori dalle gaussiane del profilo, limitandoli
+        ai range fisiologici;
+  \item si impone il vincolo strutturale sistolica $>$ diastolica (con
+        differenza minima di 10 mmHg), ricampionando la diastolica se
+        necessario.
+\end{enumerate}
+
+C'è poi un dettaglio importante: la \textbf{buffer zone}. Vicino alle soglie
+di classificazione, un piccolo rumore di misura può far cambiare classe a un
+campione, creando etichette "rumorose" sul gradino. Per questo il generatore
+scarta i campioni che cadono entro un margine da una qualunque soglia di
+confine (critica, moderata o limite del range normale). I margini reali sono
+in \codice{MARGINI\_BUFFER}: 2.0 mmHg per le pressioni, 1.0 bpm per la
+frequenza, 0.2 °C per la temperatura, 1.0\% per la saturazione e 2.0 mg/dL
+per la glicemia.
+
+\begin{esempio}{Quanti campioni vengono scartati}
+La buffer zone scarta parecchio: per generare i 40\,000 campioni di train
+sono stati scartati 52\,504 campioni; per la validation 13\,192 su 10\,000
+richiesti e per il test 26\,341 su 20\,000 (da
+\file{data/processed/metadati.json}). È il prezzo da pagare per avere
+etichette pulite vicino alle soglie.
+\end{esempio}
+
+Ogni campione generato viene etichettato dal teacher rule-based
+(capitolo \ref{cap:teacher}): la label è la classe di rischio calcolata
+dalle regole. I campioni che il teacher giudica \classe{errore} (input
+invalidi) vengono scartati: il dataset di training non contiene mai la
+classe \classe{errore}.
+
+\section{Lo split congelato}\label{sec:split-congelato}
+
+Il dataset è diviso in tre blocchi, generati con seed \textbf{derivati e
+diversi}:
+
+\begin{table}[h]
+\centering
+\caption{Lo split congelato del dataset (seed base 41).}
+\label{tab:split}
+\begin{tabular}{lrr}
+\toprule
+\textbf{Blocco} & \textbf{Seed} & \textbf{Campioni} \\
+\midrule
+train & 41 & 40\,000 \\
+validation & 42 & 10\,000 \\
+test & 43 & 20\,000 \\
+\midrule
+totale & & 70\,000 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Lo split è \textbf{congelato}: i tre blocchi vengono generati una volta e
+salvati su disco in \file{data/processed/} (\codice{X\_train.npy},
+\codice{y\_train.npy}, ecc.). Durante il tuning degli iperparametri si
+consultano solo train e validation; il test resta intatto fino alla
+valutazione finale. Se il test venisse usato per scegliere la configurazione
+migliore, le metriche finali sarebbero ottimistiche: il modello avrebbe
+"visto" il giudice prima dell'esame.
+
+\begin{esempio}{Il test non si tocca mai}
+In \file{training/train\_model.py} la selezione della configurazione migliore
+avviene sulla \emph{validation loss} (\codice{seleziona\_migliore}); il test
+viene usato una sola volta, alla fine, per calcolare le metriche finali.
+\end{esempio}
+
+\section{La normalizzazione}\label{sec:normalizzazione}
+
+Le sei feature hanno unità di misura molto diverse: la pressione sistolica
+si misura in decine di mmHg, la temperatura in gradi attorno a 37, la
+saturazione in percentuale tra 95 e 100. Se le passassimo al modello così
+come sono, le feature con valori più grandi dominerebbero il calcolo delle
+distanze e dei gradienti, indipendentemente dalla loro importanza clinica.
+
+La soluzione è la \textbf{standardizzazione}: ogni feature viene trasformata
+in
+
+\begin{equation}
+x' = \frac{x - \mu}{\sigma}
+\end{equation}
+
+dove $\mu$ è la media e $\sigma$ la deviazione standard della feature,
+calcolate \textbf{solo sul train}. Dopo la trasformazione ogni feature ha
+media 0 e deviazione standard 1, e tutte le scale sono confrontabili.
+
+Nel progetto la standardizzazione è implementata in
+\file{src/telemedicina\_supervised/ml/scaler.py} (\codice{StandardScaler}):
+il metodo \codice{fit} stima media e deviazione sul train, \codice{transform}
+applica la trasformazione. Lo scaler viene salvato \emph{dentro} l'artifact
+del modello (\file{data/models/mlp\_telemedicina.npz}), così a runtime
+l'agente applica esattamente la stessa trasformazione vista in training.
+
+\begin{esempio}{Perché lo scaler si calcola solo sul train}
+Se media e deviazione fossero calcolate su tutto il dataset (test incluso),
+il test "perderebbe" la sua natura di dati mai visti: è una forma di
+\emph{leakage}. Il codice di \file{training/train\_model.py} è esplicito:
+\codice{scaler = StandardScaler().fit(dati["X\_train"])}.
+\end{esempio}
+
+\section{Perché i dati congelati contano}\label{sec:dati-congelati-riproducibilita}
+
+Congelare i dati non è un dettaglio burocratico: è ciò che rende il progetto
+\textbf{riproducibile}. Con lo stesso seed base (41) e lo stesso codice, la
+generazione produce file byte-identici: chiunque riesegua la pipeline ottiene
+gli stessi numeri, dallo split alle metriche finali.
+
+Per rendere la provenienza verificabile, \file{data/processed/metadati.json}
+registra gli \textbf{hash di provenienza} (sha256, primi 12 caratteri) dei
+file che determinano i dati:
+
+\begin{itemize}
+  \item \codice{hash\_safety\_rules}: l'hash di \file{safety\_rules.py}, la
+        fonte unica delle soglie;
+  \item \codice{hash\_synthetic\_generator}: l'hash del generatore;
+  \item \codice{hash\_teacher\_rules}: l'hash del teacher.
+\end{itemize}
+
+Se una soglia clinica cambia, l'hash cambia e i dati generati con la vecchia
+versione non sono più confrontabili con i nuovi. È un modo semplice ma
+efficace per sapere \emph{quale versione del codice ha prodotto quali dati}.
+Il tema della riproducibilità è approfondito nel capitolo
+\ref{cap:riproducibilita}.
+
+Nel prossimo capitolo (\ref{cap:teacher}) vediamo chi produce le etichette:
+il teacher rule-based.

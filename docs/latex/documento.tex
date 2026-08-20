@@ -1,0 +1,54 @@
+% main.tex — Documento LaTeX: "Intelligenza artificiale nel progetto supervised_telemedicina"
+% Compilazione: make (vedi Makefile) oppure:
+%   pdflatex -interaction=nonstopmode -halt-on-error main.tex
+%   bibtex main
+%   pdflatex -interaction=nonstopmode -halt-on-error main.tex
+%   pdflatex -interaction=nonstopmode -halt-on-error main.tex
+\documentclass[11pt,a4paper]{report}
+
+\input{preambolo}
+
+\begin{document}
+
+% ---------------------------------------------------------------------------
+% Frontespizio
+% ---------------------------------------------------------------------------
+\begin{titlepage}
+  \centering
+  \vspace*{2cm}
+  {\Huge\bfseries Intelligenza artificiale nel progetto\\[0.4em] \texttt{supervised\_telemedicina}\par}
+  \vspace{1.2cm}
+  {\Large Una spiegazione dal basso: dal machine learning alla knowledge
+  distillation, dalla sicurezza all'incertezza\par}
+  \vspace{2.5cm}
+  {\large Documento didattico --- pensato per chi sa programmare ma non conosce l'IA\par}
+  \vfill
+  {\large \today\par}
+  \vspace{1cm}
+\end{titlepage}
+
+\tableofcontents
+\clearpage
+
+% ---------------------------------------------------------------------------
+% Capitoli
+% ---------------------------------------------------------------------------
+\input{capitoli/01_introduzione}
+\input{capitoli/02_fondamenti_ml}
+\input{capitoli/03_dati}
+\input{capitoli/04_teacher}
+\input{capitoli/05_reti_neurali}
+\input{capitoli/06_training}
+\input{capitoli/07_valutazione}
+\input{capitoli/08_distillazione}
+\input{capitoli/09_sicurezza_incertezza}
+\input{capitoli/10_riproducibilita}
+\input{capitoli/11_conclusioni}
+
+% ---------------------------------------------------------------------------
+% Bibliografia
+% ---------------------------------------------------------------------------
+\bibliographystyle{plain}
+\bibliography{bibliografia}
+
+\end{document}

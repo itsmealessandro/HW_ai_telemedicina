@@ -1,0 +1,182 @@
+% 10_riproducibilita.tex — Capitolo 10: Riproducibilità e ingegneria del progetto.
+% Documento didattico "Intelligenza artificiale nel progetto supervised_telemedicina".
+
+\chapter{Riproducibilità e ingegneria del progetto}\label{cap:riproducibilita}
+
+In questo capitolo cambiamo prospettiva: non più l'IA in sé, ma
+l'\emph{ingegneria} che la circonda. Un modello che non si può riprodurre
+non è scienza, è un aneddoto. Il progetto \progetto{} è costruito attorno a
+un principio semplice: \emph{stessi input, stessi output, sempre}. Vediamo
+come questo principio si realizza in pratica: seed e split congelati, hash
+di provenienza, report deterministico, test automatici e una dashboard che
+riusa le stesse figure di questo documento.
+
+\section{Perché la riproducibilità conta}\label{sec:perche-riproducibilita}
+
+La riproducibilità è la base della fiducia in un progetto di machine
+learning. Se due persone eseguono la stessa pipeline e ottengono numeri
+diversi, non sappiamo quale dei due risultati è giusto — e non sappiamo
+nemmeno \emph{perché} differiscono. In un progetto didattico questo è
+ancora più importante: chi legge deve poter verificare ogni affermazione
+di questo documento eseguendo i comandi e ottenendo gli stessi numeri.
+
+L'analogia da programmazione è immediata: un \emph{build riproducibile}
+compila lo stesso sorgente nello stesso binario, sempre. Un progetto di
+machine learning riproducibile fa lo stesso con i dati: lo stesso codice e
+lo stesso seed producono lo stesso dataset, lo stesso training e lo stesso
+report. Senza questa proprietà, le metriche del capitolo~\ref{cap:valutazione}
+sarebbero solo numeri senza contesto.
+
+\section{Seed e split congelati}\label{sec:seed-split-congelati}
+
+Il punto di partenza è il seed. In \file{src/telemedicina\_supervised/config.py}
+il valore di default è \codice{SEED\_DEFAULT = 41}. Da questo seed base
+derivano i seed dei tre blocchi del dataset (capitolo~\ref{cap:dati}),
+registrati in \file{data/processed/metadati.json}:
+
+\begin{table}[h]
+\centering
+\caption{Lo split congelato del dataset: seed derivati e dimensioni.}
+\label{tab:split-riproducibilita}
+\begin{tabular}{lrrr}
+\toprule
+\textbf{Blocco} & \textbf{Seed} & \textbf{Campioni} & \textbf{Scartati} \\
+\midrule
+train & 41 & 40\,000 & 52\,504 \\
+validation & 42 & 10\,000 & 13\,192 \\
+test & 43 & 20\,000 & 26\,341 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+I tre blocchi vengono generati \emph{una volta} e salvati su disco in
+\file{data/processed/} come file \codice{.npy}. Il test è \emph{congelato}:
+durante il tuning degli iperparametri (capitolo~\ref{cap:training}) si
+consultano solo train e validation, e il test viene usato una sola volta,
+alla fine, per la valutazione ufficiale. Se il test venisse ri-generato o
+ri-usato, le metriche finali perderebbero significato: il modello avrebbe
+``visto'' il giudice prima dell'esame.
+
+\begin{esempio}{Perché i seed derivati}
+I seed 41, 42 e 43 non sono tre numeri a caso: derivano dal seed base 41
+con incrementi successivi. In questo modo basta cambiare un solo valore in
+\file{config.py} per rigenerare l'intera pipeline in modo coerente, e il
+legame tra i blocchi resta documentato nel codice e nei metadati.
+\end{esempio}
+
+\section{Hash di provenienza}\label{sec:hash-provenienza}
+
+Congelare i dati non basta: bisogna sapere \emph{quale versione del codice}
+li ha prodotti. \file{data/processed/metadati.json} registra gli hash
+sha256 (primi 12 caratteri) dei tre file che determinano i dati:
+
+\begin{itemize}
+  \item \codice{hash\_safety\_rules}: \codice{c50c6c31739d} — la fonte
+        unica delle soglie cliniche;
+  \item \codice{hash\_synthetic\_generator}: \codice{5342681af107} — il
+        generatore dei campioni;
+  \item \codice{hash\_teacher\_rules}: \codice{f6968285b204} — il teacher
+        che assegna le etichette.
+\end{itemize}
+
+Il meccanismo è semplice e potente: se una soglia clinica cambia in
+\file{safety\_rules.py}, l'hash cambia e i dati generati con la vecchia
+versione non sono più confrontabili con i nuovi. Il guard test
+\file{tests/test\_single\_source.py} verifica inoltre che nessuna soglia
+numerica sia duplicata altrove: il dataset, il teacher e il safety gate
+dipendono tutti dallo stesso modulo (capitolo~\ref{cap:teacher}).
+
+\section{Il report deterministico}\label{sec:report-deterministico}
+
+Tutte le metriche di questo documento provengono da un unico file:
+\file{data/models/report.json}. Il report è \emph{deterministico}: con lo
+stesso seed e lo stesso codice, ogni esecuzione del training produce
+esattamente gli stessi numeri — dalla loss di validazione
+(\codice{loss\_val\_migliore = 0.05095}) alle metriche del test congelato
+(accuracy $0.9851$, kappa $0.9775$), fino alla distribuzione delle classi
+per blocco.
+
+Questo è il risultato concreto della riproducibilità: i numeri citati nei
+capitoli~\ref{cap:valutazione} e~\ref{cap:distillazione} non sono
+un'istantanea fortunata, ma l'esito riproducibile di una pipeline. Chi
+riesegue il training ottiene lo stesso \file{report.json}, e può
+verificare ogni affermazione di questo documento.
+
+\section{I test automatici}\label{sec:test-automatici}
+
+La riproducibilità non riguarda solo i numeri: riguarda anche il
+\emph{comportamento}. Il progetto ha 129 test automatici, eseguibili con
+un solo comando:
+
+\begin{lstlisting}[caption={Esecuzione della suite di test del progetto.}]
+PYTHONPATH=src python -m unittest discover -s tests
+\end{lstlisting}
+
+La suite copre i moduli del runtime (MLP, scaler, safety rules, agente,
+database), la pipeline di training, il contratto dei dati e la dashboard.
+Due famiglie di test meritano attenzione:
+
+\begin{itemize}
+  \item \textbf{Guard test di dipendenza}: \file{tests/test\_dashboard.py}
+        verifica che il runtime (\file{src/}, \file{training/},
+        \file{main.py}) \emph{non} importi \codice{matplotlib} né i tool
+        della dashboard. Il vincolo del progetto è esplicito: solo numpy e
+        stdlib nel runtime, matplotlib solo in sviluppo.
+  \item \textbf{Guard test di fonte unica}: \file{tests/test\_single\_source.py}
+        verifica che le soglie cliniche vivano solo in
+        \file{safety\_rules.py} e non siano duplicate altrove.
+\end{itemize}
+
+C'è anche una regressione sul codice legacy: i 14 test di
+\file{archive/legacy\_qtable\_rule\_based/tests/} garantiscono che il
+comportamento storico del sistema a regole non sia stato alterato durante
+la migrazione al nuovo progetto.
+
+\section{Architettura del codice}\label{sec:architettura-codice}
+
+La riproducibilità è anche una questione di \emph{organizzazione}. Il
+progetto separa nettamente le responsabilità in quattro aree:
+
+\begin{itemize}
+  \item \file{src/telemedicina\_supervised/}: il \textbf{runtime} — il
+        codice che gira in produzione (safety rules, MLP, agente, database,
+        servizi). Vincolo: solo numpy e stdlib.
+  \item \file{training/}: la \textbf{pipeline} — generazione del dataset,
+        teacher, training e metriche. Produce i file in \file{data/}.
+  \item \file{tools/}: la \textbf{dashboard} — strumenti di sviluppo e
+        visualizzazione, con matplotlib importato \emph{lazy} solo qui.
+  \item \file{tests/}: la \textbf{verifica} — la suite di 129 test.
+\end{itemize}
+
+Questa separazione non è estetica: è ciò che rende possibile il guard test
+sulle dipendenze. Se qualcuno importasse matplotlib nel runtime, il test
+fallirebbe e la violazione del vincolo sarebbe visibile subito, non scoperta
+per caso in produzione.
+
+\section{La dashboard come strumento didattico}\label{sec:dashboard}
+
+Chiudiamo con lo strumento che rende tutto visibile: la dashboard generata
+da \file{tools/genera\_dashboard.py}. È un file HTML \emph{autonomo}
+(\file{data/dashboard.html}) con sei viste:
+
+\begin{enumerate}
+  \item \textbf{Analisi Live}: la tabella delle analisi dal database;
+  \item \textbf{Flusso decisionale}: il percorso di un singolo caso
+        attraverso gate, MLP e fallback;
+  \item \textbf{Teacher vs MLP}: metriche, matrice di confusione e regioni
+        di decisione;
+  \item \textbf{Training}: curve di loss e confronto della griglia;
+  \item \textbf{Incertezza}: l'istogramma delle confidenze con la soglia;
+  \item \textbf{Riproducibilità}: seed, split e hash da
+        \file{metadati.json}.
+\end{enumerate}
+
+La dashboard riusa \emph{le stesse figure di questo documento}: la heatmap
+delle regioni di decisione, l'istogramma delle confidenze, la matrice di
+confusione e le curve di loss sono generate dagli stessi dati e con lo
+stesso codice (\file{tools/\_figure.py}) che produce le immagini in
+\file{figure/generate/}. Matplotlib è importato \emph{lazy} (solo se
+serve) e vive esclusivamente in \file{tools/}: la dashboard funziona anche
+senza, degradando le figure a segnaposto. È un esempio concreto del
+principio di questo capitolo: la stessa pipeline, gli stessi dati, gli
+stessi numeri — ovunque e per chiunque.

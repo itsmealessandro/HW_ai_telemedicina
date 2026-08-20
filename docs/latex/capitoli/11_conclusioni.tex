@@ -1,0 +1,156 @@
+% 11_conclusioni.tex — Capitolo 11: Conclusioni e limiti.
+% Documento didattico "Intelligenza artificiale nel progetto supervised_telemedicina".
+
+\chapter{Conclusioni e limiti}\label{cap:conclusioni}
+
+Siamo arrivati alla fine del percorso. In questo capitolo ripercorriamo le
+tappe del progetto \progetto{}, raccogliamo ciò che abbiamo imparato,
+dichiariamo con onestà i limiti del lavoro e indichiamo le possibili
+evoluzioni. L'obiettivo non è celebrare i numeri, ma capire \emph{perché}
+questo piccolo progetto è un buon esempio di ingegneria dell'IA.
+
+\section{Il percorso in sintesi}\label{sec:percorso-sintesi}
+
+Il progetto è nato da un'idea semplice: un sistema a regole cliniche
+(capitolo~\ref{cap:teacher}) che assegna una classe di rischio a sei
+parametri vitali. Per addestrare un modello servivano dati, e i dati sono
+stati generati sinteticamente con un generatore a profili e una buffer
+zone (capitolo~\ref{cap:dati}). Il modello scelto è un percettrone
+multistrato, costruito da zero in numpy (capitolo~\ref{cap:reti}) e
+addestrato con discesa del gradiente e backpropagation
+(capitolo~\ref{cap:training}). La valutazione ha mostrato un'accuracy di
+$0.9851$ sul test congelato, con gli errori concentrati vicino ai confini
+(capitolo~\ref{cap:valutazione}).
+
+Il passo successivo è stato capire \emph{cosa} il modello avesse imparato:
+la knowledge distillation (capitolo~\ref{cap:distillazione}) ha reso
+esplicito che l'MLP imita il teacher rule-based, con confini più morbidi.
+Poi è arrivata la parte più importante: la sicurezza
+(capitolo~\ref{cap:sicurezza}), con il safety gate a precedenza assoluta,
+la soglia di incertezza e il fallback. Infine, la riproducibilità
+(capitolo~\ref{cap:riproducibilita}) ha garantito che tutto questo sia
+verificabile: stessi seed, stessi hash, stessi numeri, 129 test.
+
+Ogni tappa ha lasciato un insegnamento che le successive hanno riusato: le
+regole hanno fornito le etichette, i dati hanno reso possibile il training,
+la rete ha imparato a imitare, la valutazione ha misurato il divario, la
+distillazione ha spiegato quel divario, la sicurezza lo ha contenuto e la
+riproducibilità ha reso tutto verificabile. Nessuna tappa è un'isola: il
+progetto è un sistema, non una somma di componenti.
+
+\section{Cosa abbiamo imparato}\label{sec:cosa-imparato}
+
+Tre lezioni attraversano l'intero documento.
+
+La prima: la \textbf{distillazione è un ponte tra trasparenza e
+apprendimento}. Le regole sono leggibili ma rigide; la rete è flessibile
+ma opaca. Distillare le regole in una rete non è un compromesso: è un
+modo per avere entrambe le cose — la conoscenza esplicita del teacher e la
+fluidità del modello. Il safety gate resta a garantire che, dove la rete
+non arriva, le regole decidano.
+
+La seconda: la \textbf{sicurezza è un vincolo di progetto, non un
+ripensamento}. Il safety gate non è stato aggiunto alla fine per
+``correggere'' il modello: è il primo pezzo dell'architettura, e il
+teacher stesso riusa la sua logica. Il richiamo 1.0 sui casi critici non è
+un risultato statistico: è una proprietà del codice. In un sistema clinico,
+questa è la differenza tra un esperimento e un prodotto.
+
+La terza: l'\textbf{incertezza è informazione, non un difetto}. La
+confidenza softmax non è una probabilità calibrata, ma è un segnale utile:
+quando il modello è incerto, il sistema lo dice, e ripiega su regole
+esplicite con un motivo. Nascondere l'incertezza sarebbe stato più
+elegante e più pericoloso; dichiararla è la scelta corretta.
+
+C'è anche una lezione di metodo, valida per qualunque progetto di machine
+learning: \emph{la trasparenza si progetta, non si aggiunge}. Il safety
+gate, i metadati di \codice{AgentOutcome}, gli hash di provenienza e i
+guard test non sono decorazioni: sono decisioni architetturali prese
+all'inizio, che hanno reso possibile spiegare ogni numero di questo
+documento. Chi inizia un progetto pensando prima alla trasparenza e poi
+alle metriche ottiene, alla fine, entrambe.
+
+\section{Limiti dichiarati}\label{sec:limiti-dichiarati}
+
+Un progetto onesto dichiara i propri limiti. I principali sono cinque.
+
+\begin{itemize}
+  \item \textbf{Dataset sintetico}: i dati non sono reali. Il generatore
+        produce campioni plausibili da profili clinici, ma un paziente vero
+        non è una gaussiana. Tutte le metriche misurano la fedeltà alle
+        regole sintetiche, non l'utilità clinica.
+  \item \textbf{Test congelato ottimista}: il test congelato è stato
+        generato con la buffer zone, che esclude i casi vicini alle soglie.
+        Sul test senza buffer l'accuracy scende da $0.9851$ a $0.9324$:
+        il numero ufficiale è reale, ma non va estrapolato ai casi limite.
+  \item \textbf{Soglie arbitrarie}: le soglie cliniche derivano dal codice
+        legacy e non sono state validate clinicamente. Un valore di 141
+        mmHg non è qualitativamente diverso da 139, ma le regole lo
+        trattano diversamente.
+  \item \textbf{Confidenza non calibrata}: la softmax non produce
+        probabilità calibrate. La soglia di incertezza a 0.6 è una scelta
+        di progetto ragionevole, non una garanzia statistica.
+  \item \textbf{Nessuna validazione con medici}: il progetto non è stato
+        valutato da personale clinico. Le classi di rischio e i messaggi
+        sono ragionevoli, ma nessun medico ha verificato la loro
+        appropriatezza.
+\end{itemize}
+
+Questi limiti non invalidano il progetto: lo definiscono. È un progetto
+didattico, e il suo valore sta proprio nell'essere piccolo, trasparente e
+onesto sui propri confini.
+
+\section{Possibili evoluzioni}\label{sec:evoluzioni}
+
+Dai limiti nascono le evoluzioni. Cinque direzioni sono naturali.
+
+\begin{itemize}
+  \item \textbf{Dati reali e anonimizzati}: sostituire (o affiancare) il
+        dataset sintetico con dati reali de-identificati, mantenendo la
+        pipeline di riproducibilità già costruita.
+  \item \textbf{Calibrazione delle probabilità}: trasformare la confidenza
+        softmax in una probabilità calibrata (per esempio con temperature
+        scaling o Platt scaling), rendendo la soglia di incertezza più
+        interpretabile.
+  \item \textbf{Explainability}: aggiungere strumenti di spiegazione
+        locale come SHAP o LIME per capire \emph{perché} il modello ha
+        scelto una classe, accanto al motivo già esplicito del fallback.
+  \item \textbf{Monitoraggio in produzione}: tracciare nel tempo la
+        distribuzione delle confidenze e dei fallback per rilevare
+        \emph{drift} dei dati o degrado del modello.
+  \item \textbf{Estensione del compito}: più classi di rischio, o un
+        modello di regressione per un indice di gravità continuo, con lo
+        stesso schema gate + modello + fallback.
+\end{itemize}
+
+\section{Come approfondire}\label{sec:approfondire}
+
+Per chi vuole andare oltre, la bibliografia di questo documento è il punto
+di partenza giusto. Il testo di riferimento per le reti profonde è
+\emph{Deep Learning} di Goodfellow, Bengio e Courville
+\cite{goodfellow2016deep}; per il machine learning in generale, il
+\emph{Pattern Recognition and Machine Learning} di Bishop
+\cite{bishop2006pattern} e \emph{The Elements of Statistical Learning} di
+Hastie, Tibshirani e Friedman \cite{hastie2009elements}. La knowledge
+distillation è introdotta nell'articolo originale di Hinton, Vinyals e
+Dean \cite{hinton2015distilling}. Tutti i dettagli implementativi del
+progetto sono nel repository e nella documentazione tecnica
+\cite{progetto2026}.
+
+Il consiglio pratico, per chi vuole verificare da sé: ripercorrere i
+capitoli in ordine, eseguendo i comandi del progetto a ogni tappa. Prima
+le regole e il generatore, poi il training e la valutazione, poi l'agente
+con il safety gate, infine la dashboard. Ogni numero di questo documento
+dovrebbe ricomparire identico: è il modo migliore per trasformare la
+lettura in comprensione.
+
+\medskip
+
+Il progetto \progetto{} è piccolo: 323 parametri, un MLP scritto a mano in
+numpy, un dataset sintetico. Eppure contiene tutto ciò che serve per capire
+l'IA applicata: dati, modello, training, valutazione, distillazione,
+sicurezza, incertezza e riproducibilità. La lezione finale è questa: un
+sistema piccolo, trasparente e sicuro vale più di un modello grande e
+opaco. La potenza non sta nel numero di parametri, ma nella capacità di
+spiegare ogni decisione, di contenere ogni errore e di riprodurre ogni
+risultato. Questo è il senso del percorso che abbiamo fatto insieme.

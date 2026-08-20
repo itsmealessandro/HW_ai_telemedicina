@@ -1,0 +1,80 @@
+% preamble.tex — pacchetti, stile e comandi condivisi del documento.
+% Convenzioni per i capitoli:
+%   - ogni capitolo: \chapter{Titolo}\label{cap:...}
+%   - sezioni: \section{...}\label{sec:...}
+%   - codice inline: \codice{...}  (monospace)
+%   - percorsi file: \file{...}    (monospace)
+%   - blocchi di codice: ambiente lstlisting con stile "python"
+%   - figure: \includegraphics da figure/generate/ o diagrammi TikZ da
+%     figure/diagrammi/diagrammi.tex (input condiviso)
+
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage[italian]{babel}
+\usepackage[a4paper,margin=2.5cm]{geometry}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{listings}
+\usepackage[expansion=false]{microtype}
+\usepackage{xcolor}
+\usepackage{enumitem}
+\usepackage{caption}
+\usepackage{hyperref}
+\usepackage{tikz}
+\usetikzlibrary{positioning,arrows.meta,shapes.geometric,calc}
+
+\hypersetup{
+  colorlinks=true,
+  linkcolor=blue!60!black,
+  urlcolor=blue!60!black,
+  citecolor=green!40!black,
+  pdftitle={Intelligenza artificiale nel progetto supervised_telemedicina},
+}
+
+% ---------------------------------------------------------------------------
+% Comandi custom
+% ---------------------------------------------------------------------------
+\newcommand{\codice}[1]{\texttt{#1}}
+\newcommand{\file}[1]{\texttt{#1}}
+\newcommand{\progetto}{\texttt{supervised\_telemedicina}}
+\newcommand{\classe}[1]{\texttt{#1}}
+
+% ---------------------------------------------------------------------------
+% Stile listings per il codice Python
+% ---------------------------------------------------------------------------
+\definecolor{codebg}{RGB}{245,245,245}
+\definecolor{codekw}{RGB}{0,0,139}
+\definecolor{codecm}{RGB}{128,128,128}
+\definecolor{codestr}{RGB}{163,21,21}
+\lstdefinestyle{pythonstyle}{
+  language=Python,
+  backgroundcolor=\color{codebg},
+  basicstyle=\ttfamily\small,
+  keywordstyle=\color{codekw}\bfseries,
+  commentstyle=\color{codecm}\itshape,
+  stringstyle=\color{codestr},
+  showstringspaces=false,
+  breaklines=true,
+  frame=single,
+  rulecolor=\color{black!20},
+  numbers=left,
+  numberstyle=\tiny\color{black!50},
+  numbersep=8pt,
+  tabsize=4,
+  captionpos=b,
+  literate={à}{{\`a}}1 {è}{{\`e}}1 {é}{{\'e}}1 {ì}{{\`i}}1 {ò}{{\`o}}1 {ù}{{\`u}}1 {°}{{\textdegree}}1,
+}
+\lstset{style=pythonstyle}
+
+% ---------------------------------------------------------------------------
+% Ambiente per gli "esempi dal progetto" (riquadro evidenziato)
+% ---------------------------------------------------------------------------
+\usepackage[most]{tcolorbox}
+\newenvironment{esempio}[1]{%
+  \par\medskip\noindent
+  \begin{tcolorbox}[colback=blue!5,colframe=blue!40!black,title={#1}]
+}{%
+  \end{tcolorbox}\par\medskip
+}

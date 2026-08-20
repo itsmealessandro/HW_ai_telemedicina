@@ -1,0 +1,171 @@
+\chapter{Fondamenti di machine learning supervisionato}\label{cap:fondamenti}
+
+% Capitolo 2 — Fondamenti di machine learning supervisionato.
+
+In questo capitolo introduciamo i concetti fondamentali del machine learning
+supervisionato. Sono pochi, ma vanno capiti bene perché tutto il resto del
+documento ci si appoggia. Come sempre, useremo analogie da programmazione e
+collegheremo ogni concetto al codice reale del progetto. I riferimenti
+classici per questo capitolo sono \cite{goodfellow2016deep} e
+\cite{bishop2006pattern}.
+
+\section{Dati, feature e label}\label{sec:dati-feature-label}
+
+Il punto di partenza di ogni problema di ML sono i \textbf{dati}. Un dataset
+è una tabella: se conosci SQL, una riga di dataset è esattamente una riga di
+una tabella SQL.
+
+\begin{itemize}
+  \item \textbf{Campione} (o riga): una singola osservazione. Nel nostro
+        caso, una singola misurazione dei parametri vitali di un paziente.
+  \item \textbf{Feature} (o colonne): le variabili che descrivono il
+        campione. Nel nostro caso sono sei: pressione sistolica, pressione
+        diastolica, frequenza cardiaca, temperatura, saturazione
+        dell'ossigeno e glicemia.
+  \item \textbf{Label} (o etichetta): la risposta che vogliamo imparare a
+        prevedere. Nel nostro caso è la classe di rischio:
+        \classe{basso}, \classe{medio} o \classe{alto}.
+\end{itemize}
+
+Nel ML \emph{supervisionato} il dataset contiene sia le feature sia le label:
+durante il training il modello vede coppie (input, output atteso) e impara a
+produrre l'output giusto a partire dall'input. È come studiare con le
+soluzioni in fondo al libro: ogni esercizio ha la risposta, e l'obiettivo è
+imparare il metodo, non memorizzare le singole risposte.
+
+\begin{esempio}{Una riga del dataset del progetto}
+Una riga del dataset sintetico è un vettore di sei numeri nell'ordine
+\codice{FEATURE\_ORDER}, più la label assegnata dal teacher:
+
+\begin{lstlisting}[caption={Esempio di campione etichettato (valori illustrativi)}]
+# feature: sistolica, diastolica, frequenza, temperatura, SpO2, glicemia
+campione = [120.0, 80.0, 75.0, 36.8, 98.0, 95.0]
+label    = "basso"
+\end{lstlisting}
+\end{esempio}
+
+\section{Il modello come funzione parametrizzata}\label{sec:modello-funzione-parametrizzata}
+
+Un modello di ML è, in fondo, una \textbf{funzione parametrizzata}:
+
+\begin{equation}
+y = f(x; \theta)
+\end{equation}
+
+dove $x$ è l'input (le feature), $y$ è l'output (la label) e $\theta$ è un
+vettore di parametri. La forma di $f$ è scelta dal progettista; i valori di
+$\theta$ sono sconosciuti e vengono \emph{imparati} dai dati.
+
+L'analogia da programmatore è immediata: pensa a una funzione con parametri
+da tarare.
+
+\begin{lstlisting}[caption={Una funzione parametrizzata in Python}]
+def classifica(x, theta):
+    # la forma e' fissa, i parametri theta sono da tarare
+    return combinazione(x, theta)
+\end{lstlisting}
+
+Il \textbf{training} è il processo che trova i valori di $\theta$ che fanno
+funzionare bene la funzione sui dati. Nel nostro progetto la funzione $f$ è
+un MLP a due strati e i parametri $\theta$ sono le matrici di pesi e i
+vettori di bias: \codice{W1}, \codice{b1}, \codice{W2}, \codice{b2} (vedi
+\file{src/telemedicina\_supervised/ml/mlp.py}). Il training è un loop di
+ottimizzazione che aggiorna questi parametri finché la funzione non
+approssima bene il teacher (capitolo \ref{cap:training}).
+
+\section{Training vs test}\label{sec:training-test}
+
+Se valutiamo il modello sugli stessi dati con cui l'abbiamo addestrato,
+misuriamo solo la sua capacità di \emph{ricordare}, non di \emph{capire}. Per
+misurare la generalizzazione serve un insieme di dati che il modello non ha
+mai visto durante il training.
+
+Per questo il dataset viene diviso in tre parti:
+
+\begin{itemize}
+  \item \textbf{Train}: i dati su cui il modello impara (aggiorna i
+        parametri).
+  \item \textbf{Validation}: i dati usati per scegliere gli iperparametri e
+        fermare il training quando il modello smette di migliorare.
+  \item \textbf{Test}: i dati usati una sola volta, alla fine, per misurare
+        quanto il modello generalizza su casi mai visti.
+\end{itemize}
+
+Nel nostro progetto lo split è congelato: 40\,000 campioni di train, 10\,000
+di validation e 20\,000 di test, generati con seed diversi e salvati su
+disco (capitolo \ref{cap:dati}). Il test non viene mai toccato durante il
+tuning: è il "giudice" che si consulta una sola volta.
+
+\section{Generalizzazione e overfitting}\label{sec:generalizzazione-overfitting}
+
+Il rischio principale del training è l'\textbf{overfitting}: il modello
+impara a memoria il training set invece di capire il pattern sottostante.
+L'analogia è con lo studente che ripete a memoria le soluzioni degli
+esercizi visti: va benissimo sugli esercizi noti, ma fallisce su quelli
+nuovi.
+
+Un modello in overfitting ha una loss bassissima sul train ma alta sul test:
+ha memorizzato il rumore e i dettagli irrilevanti dei dati di addestramento
+\cite{bishop2006pattern}. Al contrario, un modello che generalizza ha
+performance simili su train e test.
+
+Come si difende un progetto da questo rischio?
+
+\begin{itemize}
+  \item \textbf{Validation set}: si monitora la loss sulla validation durante
+        il training; quando smette di scendere, ci si ferma.
+  \item \textbf{Early stopping}: nel nostro progetto il training si ferma
+        dopo \codice{PAZIENZA} epoche senza miglioramento della validation
+        loss (\codice{PAZIENZA = 5} in \file{config.py}).
+  \item \textbf{Test separato}: la valutazione finale avviene su dati mai
+        visti, una sola volta.
+\end{itemize}
+
+\section{Il vocabolario comune}\label{sec:vocabolario-comune}
+
+Prima di proseguire, fissiamo il vocabolario che useremo in tutto il
+documento.
+
+\begin{description}
+  \item[Dataset:] l'insieme di campioni (righe) con le loro feature.
+  \item[Campione:] una singola osservazione, una riga del dataset.
+  \item[Feature:] una colonna del dataset, una variabile in ingresso.
+  \item[Label:] la risposta attesa per un campione.
+  \item[Predizione:] l'output prodotto dal modello per un input.
+  \item[Loss:] un numero che misura quanto le predizioni del modello sono
+        lontane dalle label attese. Più è bassa, meglio è.
+  \item[Epoca:] un passaggio completo del modello su tutto il training set.
+  \item[Batch:] un sottoinsieme di campioni usato per un singolo
+        aggiornamento dei parametri.
+  \item[Iperparametro:] un valore scelto dal progettista prima del training
+        (es. numero di neuroni nascosti, learning rate), da non confondere
+        con i parametri $\theta$ che il training impara.
+\end{description}
+
+\section{Nel progetto}\label{sec:nel-progetto}
+
+Mettiamo insieme i concetti di questo capitolo con i numeri reali del
+progetto:
+
+\begin{itemize}
+  \item \textbf{Feature}: 6 parametri vitali, nell'ordine ufficiale
+        \codice{FEATURE\_ORDER}.
+  \item \textbf{Classi}: 3 (\classe{basso}, \classe{medio}, \classe{alto}).
+  \item \textbf{Campioni}: 70\,000 totali, divisi in 40\,000 train, 10\,000
+        validation e 20\,000 test.
+  \item \textbf{Modello}: una funzione parametrizzata $f(x; \theta)$ con
+        $\theta$ = pesi e bias di un MLP a due strati.
+  \item \textbf{Training}: un loop di ottimizzazione che minimizza la loss
+        (cross-entropy) con minibatch SGD e early stopping.
+\end{itemize}
+
+\begin{esempio}{I numeri reali del progetto}
+La distribuzione delle classi nel dataset congelato (da
+\file{data/models/report.json}) è bilanciata: nel train ci sono 14\,703
+campioni \classe{basso}, 11\,423 \classe{medio} e 13\,874 \classe{alto}.
+Nessuna classe è dominante, e questo aiuta il modello a imparare tutte e tre
+le classi.
+\end{esempio}
+
+Il prossimo capitolo (\ref{cap:dati}) entra nel dettaglio dei dati: le sei
+feature cliniche, perché il dataset è sintetico e come è stato congelato.

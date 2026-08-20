@@ -1,0 +1,170 @@
+\chapter{Il teacher: un sistema a regole}\label{cap:teacher}
+
+% Capitolo 4 — Il teacher: un sistema a regole.
+
+Prima di parlare di reti neurali e training, parliamo di chi "insegna": il
+\textbf{teacher rule-based}. È il componente che assegna la classe di rischio
+a ogni combinazione di parametri vitali del dataset sintetico (capitolo
+\ref{cap:dati}). L'MLP, nei capitoli successivi, impara ad approssimare
+proprio questa funzione: è il punto di partenza della knowledge distillation
+(capitolo \ref{cap:distillazione}).
+
+\section{Cos'è un sistema a regole}\label{sec:cos-e-sistema-a-regole}
+
+Un sistema a regole è il modo più semplice e antico di scrivere un
+"classificatore": una serie di \codice{if}/\codice{elif} che confrontano i
+valori in ingresso con soglie e range predefiniti e restituiscono una
+decisione. È il tipo di codice che un medico potrebbe scrivere a mano,
+traducendo le linee guida cliniche in condizioni esplicite.
+
+\begin{lstlisting}[caption={La struttura di un sistema a regole (pseudocodice)}]
+if valore >= soglia_critica:
+    classe = "alto"
+elif valore >= soglia_moderata:
+    classe = "medio"
+else:
+    classe = "basso"
+\end{lstlisting}
+
+Un sistema a regole non impara nulla: ogni decisione è scritta esplicitamente
+nel codice. Questo lo rende deterministico (stesso input, stessa risposta,
+sempre) e completamente trasparente (ogni decisione è riconducibile a una
+condizione leggibile).
+
+\section{Le regole cliniche del progetto}\label{sec:regole-cliniche-progetto}
+
+Nel progetto le regole cliniche vivono in un unico posto:
+\file{src/telemedicina\_supervised/safety/safety\_rules.py}. È la
+\textbf{fonte unica di verità} delle soglie: il teacher offline, il
+validatore e il safety gate runtime dipendono tutti da questo modulo, e
+nessuna soglia numerica è duplicata altrove (un guard test,
+\file{tests/test\_single\_source.py}, lo verifica automaticamente).
+
+La logica di classificazione è la seguente:
+
+\begin{enumerate}
+  \item \textbf{Validità}: se un valore è fuori dal range fisiologico, o se
+        la sistolica non è maggiore della diastolica, la risposta è
+        \classe{errore}.
+  \item \textbf{Anomalie}: per ogni parametro fuori dal range normale si
+        calcola la gravità: \emph{critica} (oltre le soglie critiche),
+        \emph{moderata} (oltre le soglie moderate) o \emph{lieve}.
+  \item \textbf{Pattern critici}: alcune \emph{combinazioni} di parametri
+        sono pericolose anche se ogni singolo valore non è critico (es.
+        ipotensione con tachicardia = shock).
+  \item \textbf{Decisione}: se c'è un pattern critico o almeno un'anomalia
+        critica, la classe è \classe{alto}; se c'è qualunque anomalia non
+        critica, \classe{medio}; altrimenti \classe{basso}.
+\end{enumerate}
+
+Le soglie critiche reali del progetto sono:
+
+\begin{table}[h]
+\centering
+\caption{Soglie critiche per parametro (da \file{safety\_rules.py}).}
+\label{tab:soglie-critiche}
+\begin{tabular}{ll}
+\toprule
+\textbf{Parametro} & \textbf{Soglia critica} \\
+\midrule
+\codice{pressione\_sistolica} & $\geq$ 180 mmHg \\
+\codice{pressione\_diastolica} & $\geq$ 110 mmHg \\
+\codice{frequenza\_cardiaca} & $\geq$ 120 bpm oppure $\leq$ 50 bpm \\
+\codice{temperatura} & $\geq$ 38.5 °C oppure $\leq$ 35.0 °C \\
+\codice{saturazione\_ossigeno} & $\leq$ 90 \% \\
+\codice{glicemia} & $\geq$ 200 mg/dL oppure $\leq$ 60 mg/dL \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Il teacher vero e proprio è in \file{training/teacher\_rules.py}: la classe
+\codice{TeacherRules} con il metodo \codice{label}. Il punto architetturale
+centrale è che il teacher \emph{non possiede soglie proprie}: riusa la stessa
+funzione \codice{classifica\_rischio} del modulo di sicurezza. In questo modo
+le etichette (offline) e il safety gate (runtime) non possono divergere.
+
+\begin{lstlisting}[caption={Il metodo label del teacher (codice reale, abbreviato)}]
+# training/teacher_rules.py
+from telemedicina_supervised.safety.safety_rules import classifica_rischio
+
+class TeacherRules:
+    """Teacher rule-based offline: produce la label per una
+    combinazione di parametri vitali."""
+
+    def label(self, parametri):
+        """Label di rischio: 'basso' | 'medio' | 'alto' | 'errore'."""
+        return classifica_rischio(parametri)
+
+    # Alias esplicito per uso in generazione dataset.
+    etichetta = label
+\end{lstlisting}
+
+\begin{esempio}{Un caso critico reale}
+Con i parametri (185, 110, 80, 36.8, 98, 95) — sistolica 185 e diastolica
+110 — le regole rilevano una crisi ipertensiva (pattern critico) e
+rispondono \classe{alto}. Il safety gate runtime applica la stessa logica:
+un caso del genere non passa mai dall'MLP.
+\end{esempio}
+
+\section{Vantaggi}\label{sec:vantaggi}
+
+Il teacher rule-based ha quattro vantaggi che lo rendono ideale come fonte
+delle etichette:
+
+\begin{itemize}
+  \item \textbf{Trasparenza totale}: ogni decisione è una condizione
+        leggibile nel codice. Non c'è nessuna "scatola nera".
+  \item \textbf{Determinismo}: stesso input, stessa risposta, sempre. Le
+        etichette sono riproducibili per costruzione.
+  \item \textbf{Spiegabilità}: per ogni caso si può dire \emph{perché} la
+        classe è quella: basta elencare le anomalie e i pattern rilevati.
+  \item \textbf{Nessun training}: non servono dati storici né un processo di
+        apprendimento: le regole sono scritte a mano e funzionano subito.
+\end{itemize}
+
+\section{Limiti}\label{sec:limiti}
+
+I sistemi a regole hanno però limiti ben noti, ed è importante dichiararli:
+
+\begin{itemize}
+  \item \textbf{Rigidità}: le regole coprono solo i casi previsti a priori.
+        Una combinazione di parametri mai immaginata non viene gestita.
+  \item \textbf{Soglie arbitrarie}: i confini tra \classe{basso},
+        \classe{medio} e \classe{alto} sono numeri fissi (es. 140 mmHg per
+        la sistolica), ma la realtà clinica è sfumata: un valore di 141 non
+        è qualitativamente diverso da 139.
+  \item \textbf{Manutenzione manuale}: ogni nuova conoscenza clinica va
+        tradotta a mano in nuove condizioni, con il rischio di errori e
+        incoerenze.
+  \item \textbf{Confini netti}: la classificazione è a gradino: basta un
+        decimo di grado per cambiare classe. È proprio per questo che il
+        generatore del dataset usa la buffer zone (capitolo \ref{cap:dati}).
+\end{itemize}
+
+Questi limiti non rendono il teacher inutile: lo rendono il \emph{punto di
+partenza} giusto. Le regole sono la conoscenza di base; il modello impara ad
+approssimarle in modo fluido e continuo, e il safety gate resta a garantire
+che nessun caso critico venga mai declassato.
+
+\section{Il teacher come oracolo}\label{sec:teacher-oracolo}
+
+Nel progetto il teacher ha un ruolo preciso: è l'\textbf{oracolo} che
+etichetta il dataset sintetico. Ogni campione generato (capitolo
+\ref{cap:dati}) viene passato a \codice{label}, e la classe restituita
+diventa la label del campione. In questo modo il dataset contiene, per
+costruzione, la "verità" del teacher: l'MLP non impara da dati clinici reali,
+ma dalla funzione rule-based.
+
+Questo è esattamente il punto di partenza della \textbf{knowledge
+distillation} \cite{hinton2015distilling}: un sistema complesso (qui, un
+sistema a regole) "dista" la propria conoscenza a un modello più semplice
+(qui, un MLP). Il capitolo \ref{cap:distillazione} approfondisce questo
+passaggio.
+
+\begin{esempio}{La baseline del teacher}
+Il report di training (\file{data/models/report.json}) registra la
+\emph{baseline rule-based}: il teacher applicato alle proprie label sul test
+ha un accordo di 1.0 su 20\,000 campioni. È l'upper bound di imitazione:
+l'accuracy dell'MLP va letta come fedeltà alle regole, non come accuratezza
+diagnostica su pazienti reali.
+\end{esempio}

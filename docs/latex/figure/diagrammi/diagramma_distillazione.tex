@@ -1,0 +1,16 @@
+% diagramma_distillazione.tex — diagramma TikZ (incluso dai capitoli).
+\begin{tikzpicture}[
+    nodo/.style={draw, rounded corners=2pt, minimum height=0.9cm, align=center, font=\small},
+    freccia/.style={-{Stealth[length=2.5mm]}, thick},
+  ]
+  \node[nodo, fill=blue!10] (teacher) at (0,0) {Teacher rule-based\\\file{teacher\_rules.py}};
+  \node[nodo, fill=green!15] (gen) at (3.4,0) {Generatore sintetico\\\file{synthetic\_generator.py}};
+  \node[nodo, fill=orange!15] (ds) at (6.8,0) {Dataset etichettato\\70\,000 campioni};
+  \node[nodo, fill=green!15] (mlp) at (10.2,0) {MLP numpy\\6 $\to$ $n$ $\to$ 3};
+  \node[nodo, fill=red!15] (gate) at (13.6,0) {Safety gate\\a runtime};
+  \draw[freccia] (teacher) -- (gen);
+  \draw[freccia] (gen) -- (ds);
+  \draw[freccia] (ds) -- (mlp);
+  \draw[freccia] (mlp) -- (gate);
+  \node[below=0.3cm of ds, font=\scriptsize, align=center] {etichette = decisioni\\del teacher (distillazione)};
+\end{tikzpicture}
