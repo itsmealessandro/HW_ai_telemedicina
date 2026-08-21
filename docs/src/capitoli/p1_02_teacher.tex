@@ -1,0 +1,49 @@
+\chapter{Il ``medico di carta'': le regole scritte a mano}\label{cap:p1-teacher}
+
+% Capitolo della Parte I --- il teacher rule-based spiegato in modo semplice.
+
+Prima di parlare di intelligenza artificiale, partiamo da qualcosa che tutti
+capiscono: le \textbf{regole}. Un esperto di medicina ha scritto, nero su
+bianco, una serie di istruzioni del tipo ``se il valore X è sopra la soglia Y,
+allora il rischio è alto''. Nel progetto chiamiamo questo insieme di regole
+il \textbf{teacher} (l'insegnante), perché il suo compito è proprio quello di
+dare la risposta giusta da cui gli altri impareranno.
+
+\section{Cosa fa e perché è utile}\label{sec:p1-teacher-cosa}
+
+Il teacher ha due caratteristiche importanti:
+
+\begin{itemize}
+  \item \textbf{È trasparente}: ogni sua decisione si può leggere. Non c'è
+        nulla di nascosto: se ti chiedi ``perché ha detto rischio alto?'',
+        puoi risalire alla regola precisa che l'ha deciso.
+  \item \textbf{È affidabile sui casi chiari}: per i valori fuori scala, le
+        sue risposte sono corrette per costruzione.
+\end{itemize}
+
+Il suo limite è che è \textbf{rigido}: le regole vanno scritte a mano, una per
+una, e non ``capiscono'' i casi che non erano stati previsti. È come un
+ricettario: segue alla lettera quello che c'è scritto, niente di più.
+
+\section{Un esempio semplice}\label{sec:p1-teacher-esempio}
+
+Immagina di voler decidere il rischio guardando solo la temperatura. L'esperto
+potrebbe scrivere:
+
+\begin{itemize}
+  \item se la temperatura è sotto i 35\,°C o sopra i 39\,°C → rischio \textbf{alto};
+  \item se è tra 37,6\,°C e 39\,°C → rischio \textbf{medio};
+  \item se è tra 36\,°C e 37,5\,°C → rischio \textbf{basso}.
+\end{itemize}
+
+Questo è, in sostanza, ciò che fa il teacher del progetto, ma per tutti e sei
+i parametri insieme. La sua vera utilità, però, non è decidere da solo: è
+fornire le \textbf{risposte corrette} da far studiare allo studente. Ed è qui
+che entrano in gioco gli esempi.
+
+\begin{esempio}{Le regole come ``chiave di volta''}
+Nel progetto le regole cliniche sono scritte in un unico posto
+(\codice{safety\_rules.py}) e nessun altro pezzo del programma le duplica.
+È la ``fonte unica'' da cui dipendono sia le etichette sia la sicurezza: se
+quella cambia, cambia tutto il resto.
+\end{esempio}

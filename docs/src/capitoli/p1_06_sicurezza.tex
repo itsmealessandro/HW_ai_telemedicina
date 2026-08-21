@@ -1,0 +1,68 @@
+\chapter{La rete di sicurezza e il verdetto finale}\label{cap:p1-sicurezza}
+
+% Capitolo della Parte I --- safety gate, incertezza, fallback e flusso completo.
+
+La rete ha imparato a giudicare i pazienti, ma \textbf{può sbagliare}. In
+medicina un errore non è un disturbo: mandare a casa un paziente in crisi
+può essere pericoloso. Per questo il sistema non si fida ciecamente della rete,
+ma le mette accanto una \textbf{rete di sicurezza}.
+
+\section{L'ispettore di sicurezza (safety gate)}\label{sec:p1-sic-gate}
+
+Prima che la rete dica la sua, interviene un \textbf{controllo automatico e
+rigido} basato sulle regole dell'esperto. Il suo compito è semplice e
+inflessibile:
+
+\begin{itemize}
+  \item se le regole dicono che il caso è \textbf{critico} (rischio alto),
+        allora la risposta è \textbf{alto} e basta;
+  \item in quel caso la rete \textbf{non viene nemmeno consultata}, e il
+        verdetto non può essere abbassato.
+\end{itemize}
+
+In pratica: sulle cose gravi, l'ultima parola spetta sempre alle regole
+dell'esperto, mai alla macchina che ha imparato per imitazione.
+
+\section{Il pulsante «non sono sicuro» (fallback)}\label{sec:p1-sic-fallback}
+
+Anche nei casi non critici, la rete a volte ha dei dubbi. Ogni sua risposta
+arriva con un numero di \textbf{sicurezza}: quanto si fida di sé. Se la
+sicurezza scende sotto una soglia (nel progetto, 0,6), la rete ammette
+«non sono sicuro» e si fa dare la risposta dalle regole dell'esperto. Meglio
+chiedere, che sbagliare.
+
+\section{Tutto insieme: da un paziente al verdetto}\label{sec:p1-sic-flusso}
+
+Mettiamo insieme i pezzi. Quando arrivano i sei numeri di un paziente, il
+sistema procede così:
+
+\begin{enumerate}
+  \item L'ispettore di sicurezza guarda le regole: il caso è critico? Se sì
+        → risposta \textbf{alto}, e si ferma qui (la rete non viene
+        consultata).
+  \item Se non è critico, tocca alla rete: lei guarda i numeri e dà un rischio
+        con la sua sicurezza.
+  \item La sicurezza è bassa (sotto 0,6)? Allora si chiede all'esperto
+        (fallback).
+  \item Altrimenti si tiene la risposta della rete.
+  \item In ogni caso, il risultato viene registrato e, se il caso è grave, il
+        medico viene avvisato.
+\end{enumerate}
+
+\begin{esempio}{Tre pazienti, tre finali}
+\begin{itemize}
+  \item Mario ha tutti i valori nella norma. L'ispettore non vede criticità,
+        la rete risponde «basso» con sicurezza alta: verdetto basso.
+  \item Lucia ha la pressione a 200/120. L'ispettore vede subito un valore
+        critico: risposta «alto» immediata, la rete non viene nemmeno
+        interpellata.
+  \item Sara è al limite, la rete risponde ma con sicurezza 0,55 (sotto la
+        soglia). Scatta il fallback: decide l'esperto con le sue regole.
+\end{itemize}
+\end{esempio}
+
+\begin{esempio}{E alla fine?}
+Ogni verdetto viene salvato in un database, insieme a chi l'ha dato (rete,
+ispettore o esperto) e a quanto era sicuro. Se il caso è grave, parte una
+notifica per il medico. Così niente passa inosservato.
+\end{esempio}

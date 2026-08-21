@@ -62,25 +62,78 @@ Il sistema classifica **6 parametri vitali** in **3 classi di rischio**
 | saturazione_ossigeno | % |
 | glicemia | mg/dL |
 
-Il percorso è interamente **supervised** e si articola in quattro idee chiave:
+Per chi non conosce l'IA, il punto chiave è questo: **il sistema non "indovina"
+a caso**. Parte da una conoscenza clinica esplicita (regole scritte a mano) e
+la trasforma in un modello che ha imparato a riconoscere i pattern. Il percorso
+è interamente **supervised** (supervisionato): qualcuno mostra al modello
+esempi già etichettati e il modello impara da quelli.
 
-1. **Teacher rule-based** — un classificatore a regole cliniche (range e soglie
-   in `safety_rules.py`, fonte unica mai duplicata) etichetta un **dataset
-   sintetico** di 70 000 campioni (train 40 000 / val 10 000 / test 20 000,
-   seed 41, split congelati).
-2. **MLP numpy da zero** — una rete 6→n→3 (ReLU + softmax, cross-entropy,
-   backpropagation, gradient check ~1e-10) addestrata con early stopping
-   (pazienza 5) e ricerca a griglia su 6 configurazioni. Risultati sul test
-   congelato: **accuracy 0.9851**, kappa 0.9775, recall classe alto 0.9958.
-3. **Knowledge distillation** — il MLP impara dalle etichette del teacher:
-   un sistema a regole trasparente "dista" la propria conoscenza in una rete
-   veloce e robusta (confronto delle regioni di decisione nella dashboard).
-4. **Safety gate deterministico** — a runtime il gate ha **precedenza assoluta**:
-   un caso critico (`alto`) non passa mai dall'MLP e non può essere declassato
-   (richiamo 1.0 per costruzione). Se la confidenza softmax è sotto la soglia
-   di incertezza (0.6), il sistema fa **fallback** sulle regole testuali.
-   Ogni analisi è persistita su SQLite con metadati (modello usato, confidenza,
-   fallback) e i casi critici generano **notifiche** per il medico.
+Ecco i passaggi, dal punto di partenza al verdetto finale:
+
+### 1. Il teacher rule-based — la "conoscenza di partenza"
+
+Un classificatore a regole cliniche: range e soglie scritte a mano da un
+esperto (in `safety_rules.py`, fonte unica mai duplicata). Per ogni
+combinazione di valori vitali dice subito se il rischio è `basso`, `medio` o
+`alto`. È trasparente al 100% (ogni regola si può leggere e capire), ma è
+rigido: va scritto a mano e non generalizza a casi mai visti.
+
+### 2. Il dataset sintetico — gli "esempi" su cui imparare
+
+Per insegnare al modello servono tanti esempi. Il teacher genera un **dataset
+sintetico** di 70 000 pazienti fittizi ma realistici (train 40 000 / val
+10 000 / test 20 000, seed 41, split congelati) e li etichetta con le sue
+regole. Ogni esempio è una coppia: *valori vitali → classe di rischio*.
+
+### 3. L'MLP — la "rete neurale" che impara
+
+L'**MLP (Multi-Layer Perceptron)** è una rete neurale scritta da zero in numpy:
+una funzione matematica con centinaia di "manopole" regolabili (i pesi) che,
+mostrandole gli esempi del dataset, impara a riconoscere i pattern che portano
+a una classe di rischio. Architettura **6→n→3**: 6 ingressi (i parametri
+vitali), uno strato nascosto, 3 uscite (una per classe). L'uscita softmax
+esprime la **confidenza**: quanto il modello è sicuro di ogni classe.
+
+Il training (backpropagation, cross-entropy, early stopping, ricerca a griglia
+su 6 configurazioni) regola le manopole finché le previsioni non coincidono
+con le etichette del teacher. Risultato sul test congelato: **accuracy
+0.9851**, kappa 0.9775, recall classe alto 0.9958.
+
+### 4. La knowledge distillation — "le regole insegnano alla rete"
+
+Il MLP non inventa nulla: impara dalle etichette del teacher. È la
+**knowledge distillation**: un sistema a regole trasparente "dista" la propria
+conoscenza in una rete veloce e robusta, che ha imparato la stessa logica ma
+può generalizzare a casi mai visti (confronto delle regioni di decisione nella
+dashboard).
+
+### 5. Il safety gate — la "rete di sicurezza"
+
+Una rete neurale può sbagliare. Per questo a runtime il **safety gate
+deterministico** ha **precedenza assoluta**: se le regole cliniche dicono che
+il caso è critico (`alto`), il caso **non passa mai dall'MLP** e non può essere
+declassato (richiamo 1.0 per costruzione). La macchina impara, ma l'ultima
+parola sui casi gravi resta alle regole.
+
+### 6. Incertezza e fallback — "quando il modello non è sicuro"
+
+Se la confidenza softmax è sotto la soglia di incertezza (0.6), il sistema non
+si fida del modello e fa **fallback** sulle regole testuali. Ogni analisi è
+persistita su SQLite con metadati (modello usato, confidenza, fallback) e i
+casi critici generano **notifiche** per il medico.
+
+### Il flusso completo, in una riga
+
+```
+parametri vitali
+   → safety gate: caso critico? ── sì ──→ classe "alto" (senza passare dall'MLP)
+   │
+   └─ no → MLP: previsione + confidenza
+              → confidenza < 0.6? ── sì ──→ fallback sulle regole testuali
+              │
+              └─ no → classe del MLP
+   → persistenza su SQLite + notifica se critico
+```
 
 Il tutto rispetta un vincolo di progetto rigoroso: **solo numpy + standard
 library** nel runtime (vietati sklearn, joblib, pandas); matplotlib è ammesso
@@ -128,15 +181,18 @@ teacher vs MLP (heatmap, errori), training (curve loss), incertezza
 ### Documento LaTeX sugli aspetti di IA
 
 ```bash
-cd docs/latex
-make          # compila documento.pdf (45 pagine)
-make open     # compila e apre
+cd docs/src
+make          # compila e scrive documento.pdf in docs/
+make open     # compila e apre docs/documento.pdf
 ```
 
-Il documento spiega, partendo dalle basi per chi sa programmare ma non conosce
-l'IA, tutti gli aspetti del progetto: machine learning supervisionato, dati,
-reti neurali, backpropagation, valutazione, knowledge distillation, sicurezza
-e incertezza, riproducibilità. Le figure sono generate dai dati reali del
+Il documento è in due parti. La **Parte I** è una spiegazione semplice per chi
+non conosce l'IA: con esempi di tutti i giorni spiega cosa fa il sistema e di
+cosa si occupa ciascun componente (teacher, dataset, rete neurale,
+distillazione, safety gate). La **Parte II** è l'analisi tecnica vera e
+propria per chi sa programmare: machine learning supervisionato, dati, reti
+neurali, backpropagation, valutazione, knowledge distillation, sicurezza e
+incertezza, riproducibilità. Le figure sono generate dai dati reali del
 progetto (`genera_figure.py`).
 
 ---
@@ -150,7 +206,7 @@ progetto (`genera_figure.py`).
 | `supervised_telemedicina/docs/contratto.md` | Contratto di dominio (feature, classi, safety) |
 | `supervised_telemedicina/docs/review_finale.md` | Review informale finale con limiti dichiarati |
 | `knowledge/README.md` | Indice degli appunti di teoria del corso |
-| `docs/latex/documento.pdf` | Documento didattico sugli aspetti di IA del progetto |
+| `docs/documento.pdf` | Documento didattico sugli aspetti di IA del progetto (sorgenti in `docs/src/`) |
 | `.plans/` | Piani di sviluppo (fasi 0-8 + dashboard V1-V4) |
 
 ---

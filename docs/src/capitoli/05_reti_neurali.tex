@@ -10,7 +10,7 @@ dataset sintetico etichettato da quelle regole (capitolo~\ref{cap:teacher}).
 In questo capitolo entriamo nel cuore del progetto: la rete neurale che deve
 \textit{imitare} il teacher. Partiamo dal singolo neurone artificiale e
 costruiamo, passo dopo passo, il percettrone multistrato (MLP) implementato
-in \file{src/telemedicina\_supervised/ml/mlp.py}.
+in \file{src/telemedicina\_supervised/ml/mlp.py} \cite{knowledge_nn2026}.
 
 \section{Il neurone artificiale}\label{sec:neurone-artificiale}
 
@@ -56,9 +56,75 @@ vettoriale.
 \section{Perché serve la non linearità}\label{sec:non-linearita}
 
 Una domanda naturale è: perché complicarsi la vita con una non linearità?
-La risposta è matematica e ha un'analogia diretta con la programmazione.
-Una composizione di trasformazioni lineari è ancora una trasformazione
-lineare: se $f(x) = W_1 x + b_1$ e $g(y) = W_2 y + b_2$, allora
+La risposta è pratica prima ancora che matematica: un modello puramente
+lineare può solo tracciare rette, e molti problemi reali non si separano con
+una retta.
+
+\subsection{Un esempio concreto: quando una retta non basta}\label{sec:nonlinear-esempio}
+
+Immagina di dover separare due gruppi di punti su un piano in base al colore.
+Se i punti rossi stanno da una parte e quelli blu dall'altra rispetto a una
+\emph{retta}, un modello lineare (una retta, o in più dimensioni un iperpiano)
+risolve il problema alla perfezione. Ma spesso le due classi si intrecciano e
+\textbf{nessuna retta} riesce a separarle. Due casi classici:
+
+\begin{itemize}
+  \item \textbf{Cerchi concentrici}: la classe blu è un disco interno, quella
+        rossa un anello esterno. Qualunque retta attraversa sia il disco sia
+        l'anello, quindi non può separarli: serve un confine \emph{curvo}
+        (una circonferenza).
+  \item \textbf{XOR}: i punti $(0,0)$ e $(1,1)$ sono blu, i punti $(0,1)$ e
+        $(1,0)$ sono rossi. Non esiste una retta che lasci i blu da una parte
+        e i rossi dall'altra: serve un confine a ``quadrato''.
+\end{itemize}
+
+La figura~\ref{fig:linearita-esempi} mostra i due casi. Nel nostro progetto le
+classi di rischio hanno proprio questo tipo di confine non lineare: le soglie
+del teacher si combinano su più parametri (per esempio pressione \emph{e}
+glicemia fuori range insieme), perciò un modello puramente lineare non
+basterebbe a imitarlo.
+
+\begin{figure}[htbp]
+  \centering
+  \begin{minipage}{0.47\textwidth}
+    \centering
+    \begin{tikzpicture}[scale=0.95]
+      \draw[->] (0,0) -- (3,0) node[right] {$x_1$};
+      \draw[->] (0,0) -- (0,3) node[above] {$x_2$};
+      \draw[thick, blue, dashed] (-0.3,-0.1) -- (3.1,3.1) node[above right] {retta};
+      \foreach \x/\y in {0.5/1.6,1.0/2.4,1.7/2.7,0.3/2.2,2.2/2.3}
+        \fill[red] (\x,\y) circle (2.6pt);
+      \foreach \x/\y in {1.3/0.3,2.1/0.9,2.6/1.5,0.7/0.5,1.0/0.15}
+        \fill[blue] (\x,\y) circle (2.6pt);
+    \end{tikzpicture}
+    \par\small Linearmente separabile: una retta basta.
+  \end{minipage}
+  \hfill
+  \begin{minipage}{0.47\textwidth}
+    \centering
+    \begin{tikzpicture}[scale=0.95]
+      \draw[->] (0,0) -- (3,0) node[right] {$x_1$};
+      \draw[->] (0,0) -- (0,3) node[above] {$x_2$};
+      \foreach \a in {0,20,40,60,80,100,120,140,160,180,200,220,240,260,280,300,320,340}
+        \fill[red] ({1.5+1.0*cos(\a)},{1.5+1.0*sin(\a)}) circle (2.6pt);
+      \foreach \a in {0,30,60,90,120,150,180,210,240,270,300,330}
+        \foreach \r in {0.15,0.45,0.75}
+          \fill[blue] ({1.5+\r*cos(\a)},{1.5+\r*sin(\a)}) circle (2.6pt);
+      \draw[thick, blue, dashed] (1.5,0.3) -- (1.5,2.7);
+    \end{tikzpicture}
+    \par\small Non linearmente separabile: serve una curva.
+  \end{minipage}
+  \caption{Esempi pratici di separabilità. A sinistra le due classi si dividono
+  con una retta; a destra la classe blu è un disco interno e quella rossa un
+  anello esterno: qualunque retta attraversa entrambe, serve un confine curvo.}
+  \label{fig:linearita-esempi}
+\end{figure}
+
+\subsection{Perché impilare strati lineari non aiuta}\label{sec:nonlinear-matematica}
+
+La ragione matematica è semplice: una composizione di trasformazioni lineari
+è ancora una trasformazione lineare. Se $f(x) = W_1 x + b_1$ e
+$g(y) = W_2 y + b_2$, allora
 $g(f(x)) = (W_2 W_1) x + (W_2 b_1 + b_2)$, cioè una sola trasformazione
 lineare con matrice $W_2 W_1$ e bias $W_2 b_1 + b_2$.
 
@@ -71,11 +137,46 @@ relazioni non lineari (come le soglie del teacher, che sono \emph{confini
 netti} nello spazio delle feature) serve almeno una non linearità tra uno
 strato e l'altro.
 
+\subsection{La non linearità piega lo spazio}\label{sec:nonlinear-relu}
+
 La ReLU, in particolare, introduce dei ``ginocchi'' nella funzione appresa:
 la rete può ``piegare'' lo spazio delle feature in corrispondenza dei punti
-in cui $z$ cambia segno. Con più neuroni e più strati, queste piegature si
-combinano e la rete può approssimare confini di decisione arbitrariamente
-complessi (capitolo~\ref{cap:distillazione}).
+in cui $z$ cambia segno. La figura~\ref{fig:linearita-attivazione} mostra la
+differenza: senza attivazione la rete può solo tracciare rette; con la ReLU
+compare una piega che, ripetuta in più neuroni e più strati, permette di
+approssimare confini di decisione arbitrariamente complessi
+(capitolo~\ref{cap:distillazione}).
+
+\begin{figure}[htbp]
+  \centering
+  \begin{minipage}{0.47\textwidth}
+    \centering
+    \begin{tikzpicture}[scale=0.95]
+      \draw[->] (-2,0) -- (2,0) node[right] {$z$};
+      \draw[->] (0,-1) -- (0,2) node[above] {$f(z)$};
+      \draw[thick, blue] (-1.6,-0.8) -- (1.6,0.8) node[above right] {lineare};
+    \end{tikzpicture}
+    \par\small Solo rette: anche impilando strati lineari resta una retta.
+  \end{minipage}
+  \hfill
+  \begin{minipage}{0.47\textwidth}
+    \centering
+    \begin{tikzpicture}[scale=0.95]
+      \draw[->] (-2,0) -- (2,0) node[right] {$z$};
+      \draw[->] (0,-0.2) -- (0,2) node[above] {$f(z)$};
+      \draw[thick, blue, domain=-2:2, samples=50, smooth]
+        plot (\x, {1/(1+exp(-\x))}) node[above right] {sigmoide};
+    \end{tikzpicture}
+    \par\small Con un'attivazione non lineare la funzione si curva (non è più una retta).
+  \end{minipage}
+  \caption{A sinistra, una funzione lineare: una retta. A destra, una
+  funzione di attivazione non lineare (qui una sigmoide, disegnata per
+  evidenziare la curvatura): la forma non è rettilinea. Nel progetto usiamo
+  la ReLU, la cui ``piega'' (un ginocchio a spigolo) è la versione più
+  semplice della stessa idea: rompe la linearità e permette alla rete di
+  curvane i confini di decisione.}
+  \label{fig:linearita-attivazione}
+\end{figure}
 
 \section{Dal neurone alla rete}\label{sec:dal-neurone-alla-rete}
 

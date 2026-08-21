@@ -40,7 +40,7 @@ learning e deep learning — non sono sinonimi: sono tre cerchi concentrici.
 
 Un modo sintetico di ricordarlo: \emph{l'IA è il campo, il ML è il metodo
 statistico, il deep learning è una famiglia di modelli}
-\cite{goodfellow2016deep}.
+\cite{goodfellow2016deep, knowledge_fond2026}.
 
 In questo progetto useremo machine learning \emph{supervisionato} con una
 rete neurale piccola (un percettrone multistrato, MLP) scritta da zero in
@@ -75,40 +75,6 @@ ferrea: le regole deterministiche di sicurezza hanno \textbf{precedenza
 assoluta} sul modello. Un caso che le regole giudicano critico non passa mai
 dalla rete neurale e non può mai essere declassato. Il modello impara a
 imitare le regole, ma le regole restano il garante finale.
-
-\section{La soluzione in una frase}\label{sec:soluzione-in-una-frase}
-
-La soluzione del progetto si può riassumere in una frase:
-
-\begin{quote}
-Un \emph{teacher} rule-based etichetta un dataset sintetico; un MLP in numpy
-impara ad approssimare il teacher; a runtime un \emph{safety gate}
-deterministico ha precedenza assoluta sul modello.
-\end{quote}
-
-In pratica il percorso è questo:
-
-\begin{enumerate}
-  \item \textbf{Teacher rule-based}: un sistema a regole (if/elif su soglie
-        cliniche) assegna la classe di rischio a ogni combinazione di
-        parametri. È la fonte delle etichette (capitolo \ref{cap:teacher}).
-  \item \textbf{Dataset sintetico}: il teacher etichetta 70\,000 campioni
-        generati artificialmente, congelati in train/val/test
-        (capitolo \ref{cap:dati}).
-  \item \textbf{MLP numpy}: una rete neurale a due strati impara ad
-        approssimare la funzione del teacher (capitoli \ref{cap:reti} e
-        \ref{cap:training}).
-  \item \textbf{Safety gate}: a runtime, le regole di sicurezza vengono
-        applicate prima del modello; il modello interviene solo sui casi che
-        le regole non considerano critici (capitolo \ref{cap:sicurezza}).
-\end{enumerate}
-
-\begin{esempio}{Il flusso in una riga di codice}
-Nel runtime, il metodo \codice{predict} di \codice{SupervisedAgent} applica
-prima \codice{analizza} (le regole di sicurezza) e solo dopo, se il caso non
-è critico, interroga l'MLP. Il codice reale è in
-\file{src/telemedicina\_supervised/agents/supervised\_agent.py}.
-\end{esempio}
 
 \section{Mappa del documento}\label{sec:mappa-documento}
 

@@ -1,0 +1,46 @@
+\chapter{La macchina che impara da sola: la rete neurale}\label{cap:p1-rete}
+
+% Capitolo della Parte I --- l'MLP spiegato in modo semplice.
+
+Lo \textbf{studente} di cui abbiamo parlato è, tecnicamente, una \textbf{rete
+neurale} (nel progetto un MLP, scritto da zero senza librerie pronte). Ma
+cos'è, in parole povere?
+
+\section{Una funzione con parametri regolabili}\label{sec:p1-rete-manopole}
+
+La rete neurale è una \textbf{funzione}: prende in ingresso i sei numeri del
+paziente e restituisce, in uscita, tre numeri (uno per ciascuna classe di
+rischio) che dicono quanto il sistema è \textbf{sicuro} che il rischio sia
+basso, medio o alto. Il comportamento della funzione è determinato da tanti
+numeri, detti \textbf{pesi}. All'inizio i pesi sono fissati a caso, quindi le
+risposte della rete non hanno senso.
+
+L'\textbf{allenamento} è il momento in cui, mostrando alla rete le flashcard di
+allenamento, i pesi vengono corretti poco alla volta nella direzione giusta,
+finché la rete non comincia a dare le risposte corrette. Più esempi vede, più
+i pesi si sistemano (vedi il capitolo~\ref{cap:p1-sicurezza} e la Parte II per
+il meccanismo preciso).
+
+\section{A cosa serve davvero}\label{sec:p1-rete-a-cosa-serve}
+
+Una volta sistemati i pesi, la rete è pronta. Da quel momento in poi le basta
+ricevere i sei numeri di un \emph{nuovo} paziente per restituire un rischio, in
+un istante, senza chiedere all'esperto. Ecco perché serve:
+
+\begin{itemize}
+  \item \textbf{È veloce}: giudica un paziente in un lampo.
+  \item \textbf{Generalizza}: avendo imparato il pattern, sa giudicare anche
+        casi che non aveva mai visto nelle flashcard.
+  \item \textbf{È comoda}: una volta addestrata, non serve più l'esperto per
+        ogni singola decisione.
+\end{itemize}
+
+\section{La sua forma}\label{sec:p1-rete-forma}
+
+La struttura della rete è semplice da visualizzare: sei ingressi (i parametri),
+uno strato intermedio che \textbf{elabora}, e tre uscite (le tre classi di
+rischio). Si scrive spesso \textbf{6 -> n -> 3}: sei numeri entrano, n
+\textbf{neuroni} intermedi lavorano, tre risposte escono.
+
+La rete però non inventa nulla di suo: ha imparato copiando le risposte
+dell'esperto. Ed è questo il legame che spieghiamo nel prossimo capitolo.

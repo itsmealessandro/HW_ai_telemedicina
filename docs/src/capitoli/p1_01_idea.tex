@@ -1,0 +1,42 @@
+\chapter{L'idea in parole semplici}\label{cap:p1-idea}
+
+% Capitolo della Parte I --- spiegazione per chi non conosce l'IA.
+
+Immagina di dover guardare sei numeri che descrivono lo stato di una persona
+--- la pressione, i battiti del cuore, la temperatura, l'ossigeno nel sangue,
+lo zucchero nel sangue --- e di dover rispondere a una sola domanda:
+\emph{``questa persona è a rischio basso, medio o alto?''}.
+
+È tutto qui. Il lavoro del sistema si riduce a questo: legge sei numeri e
+restituisce una parola tra \classe{basso}, \classe{medio} e \classe{alto}.
+
+\section{Perché servono degli ``aiutanti''}\label{sec:p1-perche-aiutanti}
+
+A prima vista sembra facile: basta scrivere ``se la pressione è troppo alta,
+allora rischio alto''. E in effetti una regola del genere si può scrivere. Ma
+il corpo umano è complicato: i sei numeri si influenzano a vicenda, e decidere
+il rischio giusto richiede di considerarli tutti insieme. Scrivere a mano
+tutte le combinazioni possibili è noioso, rigido e facile sbagliare.
+
+Per questo il progetto usa l'intelligenza artificiale: invece di elencare
+ogni singola regola, si fa in modo che una macchina \emph{impari} il pattern
+dai dati. Ma perché la macchina impari, e perché lo faccia in sicurezza, il
+sistema si appoggia a diversi ``aiutanti'', ognuno con un compito preciso.
+
+\begin{itemize}
+  \item \textbf{L'esperto (teacher rule-based)}: conosce le regole cliniche e
+        sa dire, per ogni combinazione di valori, qual è il rischio giusto.
+  \item \textbf{Gli esempi (dataset)}: tanti casi di pazienti ``di prova'',
+        ognuno già etichettato con il rischio corretto dall'esperto.
+  \item \textbf{Lo studente (MLP, la rete neurale)}: studia quegli esempi e
+        impara a riconoscere il pattern, così da giudicare anche pazienti mai
+        visti.
+  \item \textbf{L'ispettore di sicurezza (safety gate)}: controlla per primo i
+        casi gravi e ha l'ultima parola.
+  \item \textbf{Il pulsante ``non sono sicuro'' (fallback)}: quando lo studente
+        ha dei dubbi, si chiede consiglio all'esperto.
+\end{itemize}
+
+I prossimi capitoli spiegano ciascun aiutante con parole semplici. Nella
+Parte II troverai la stessa storia, ma dal punto di vista tecnico: dati,
+algoritmi, codice e numeri.

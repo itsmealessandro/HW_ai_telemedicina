@@ -1,0 +1,69 @@
+\chapter{Imparare dagli esempi: il dataset}\label{cap:p1-dati}
+
+% Capitolo della Parte I --- il dataset spiegato in modo semplice.
+
+Per insegnare allo studente (la rete neurale) a riconoscere il rischio, serve
+materiale su cui esercitarsi: degli \textbf{esempi}. Nel progetto questi
+esempi si chiamano \textbf{dataset}.
+
+\section{Cosa contiene il dataset}\label{sec:p1-dati-cosa}
+
+Il dataset è una semplice raccolta di ``schede paziente''. Ogni scheda ha due
+parti:
+
+\begin{itemize}
+  \item \textbf{I numeri} (i sei parametri vitali misurati);
+  \item \textbf{La risposta} (il rischio giusto: basso, medio o alto), scritta
+        dall'esperto di cui abbiamo parlato nel capitolo precedente.
+\end{itemize}
+
+È esattamente come un mazzo di \textbf{flashcard}: da una parte i dati del
+paziente, dall'altra la risposta corretta. Lo studente le usa per imparare.
+
+\section{Perché i dati sono ``finti''}\label{sec:p1-dati-sintetici}
+
+I pazienti del dataset non sono persone vere: sono generati artificialmente
+dal computer, ma in modo da essere il più possibile realistici. Tre buoni
+motivi:
+
+\begin{itemize}
+  \item \textbf{Privacy}: non servono dati sanitari veri, quindi non ci sono
+        problemi di riservatezza.
+  \item \textbf{Controllo}: possiamo decidere quanti esempi generare per ogni
+        tipo di situazione, così lo studente vede un po' di tutto.
+  \item \textbf{Ripetibilità}: con gli stessi numeri iniziali (il ``seed'') il
+        computer rigenera sempre esattamente gli stessi dati. Stessi dati,
+        stessi risultati.
+\end{itemize}
+
+Nel progetto il dataset contiene 70\,000 schede così costruite.
+
+\section{Tre mazzi diversi: prova, simulazione ed esame}\label{sec:p1-dati-split}
+
+Non si usano tutte e 70\,000 le schede nello stesso modo. Si dividono in tre
+mazzi, ciascuno con un ruolo:
+
+\begin{itemize}
+  \item \textbf{Allenamento (train)}: le schede su cui lo studente studia e
+        impara. Sono la maggior parte (40\,000).
+  \item \textbf{Verifica (validation)}: un mazzo usato per controllare, durante
+        lo studio, se lo studente sta migliorando o sta solo imparando a
+        memoria. Servono 10\,000 schede.
+  \item \textbf{Esame (test)}: un mazzo tenuto da parte e guardato una sola
+        volta alla fine, per misurare quanto lo studente sa davvero su casi
+        mai visti. Sono 20\,000 schede.
+\end{itemize}
+
+L'importante è che l'esame non venga mai ``sbirciato'' prima: altrimenti le
+misurazioni finali non sarebbero oneste.
+
+\begin{esempio}{Una flashcard del progetto}
+Una scheda del dataset potrebbe essere:
+\begin{quote}
+numeri: pressione 120/80, battiti 75, temperatura 36,8, ossigeno 98\%,
+glicemia 95 \\
+risposta: \textbf{basso}
+\end{quote}
+Lo studente vede i numeri e deve imparare ad arrivare da solo alla risposta
+``basso''.
+\end{esempio}

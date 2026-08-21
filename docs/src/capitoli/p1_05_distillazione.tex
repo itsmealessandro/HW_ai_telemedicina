@@ -1,0 +1,35 @@
+\chapter{Le regole che insegnano alla rete: la distillazione}\label{cap:p1-distillazione}
+
+% Capitolo della Parte I --- la knowledge distillation spiegata in modo semplice.
+
+Abbiamo due protagonisti: l'\textbf{esperto} che conosce le regole (il teacher)
+e la \textbf{scatola che impara} (la rete neurale). La rete non ha idee
+proprie: ha semplicemente copiato le risposte che l'esperto dava sulle
+flashcard. Questo passaggio si chiama \textbf{knowledge distillation}
+(distillazione della conoscenza): la conoscenza dell'esperto viene ``distillata''
+e trasferita dentro la rete.
+
+\section{Perché non ci si ferma alle regole?}\label{sec:p1-dist-perche}
+
+Se l'esperto sa già rispondere, perché costruire una rete che lo imita? Perché
+le due hanno vantaggi diversi:
+
+\begin{itemize}
+  \item \textbf{Le regole} sono chiare e sicure, ma vanno scritte a mano e sono
+        rigide: non gestiscono bene i casi nuovi o sfumati.
+  \item \textbf{La rete} è veloce, automatica e impara dai dati, ma può
+        sbagliare e non spiega il perché di una scelta.
+\end{itemize}
+
+La distillazione prende il meglio di entrambe: la rete impara la \emph{logica}
+dell'esperto (così diventa flessibile e veloce), ma le regole restano la
+\emph{fonte} da cui tutto deriva. Nel progetto le due convivono: la rete fa il
+lavoro di tutti i giorni, le regole restano il punto di riferimento.
+
+\begin{esempio}{Nel progetto}
+La rete (MLP) viene addestrata sulle 70\,000 flashcard etichettate dall'esperto.
+Alla fine, se le mostri un paziente nuovo, risponde con il rischio e con un
+numero di ``sicurezza'' (quanto si fida della sua risposta). Le regole, però,
+restano lì pronte a intervenire quando serve --- ed è il tema del prossimo
+capitolo.
+\end{esempio}

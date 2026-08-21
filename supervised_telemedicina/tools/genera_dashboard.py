@@ -64,6 +64,29 @@ from telemedicina_supervised.config import (  # noqa: E402
     SOGLIA_INCERTEZZA,
 )
 from telemedicina_supervised.database.analisi_db import AnalisiDatabase  # noqa: E402
+from telemedicina_supervised.agents.supervised_agent import SupervisedAgent  # noqa: E402
+from telemedicina_supervised.agents.trace import trace_analysis  # noqa: E402
+from telemedicina_supervised.safety.safety_rules import (  # noqa: E402
+    FEATURE_ORDER,
+    RANGE_FISIOLOGICI,
+)
+
+ETICHETTE: Dict[str, str] = {
+    "pressione_sistolica": "Pressione sistolica",
+    "pressione_diastolica": "Pressione diastolica",
+    "frequenza_cardiaca": "Frequenza cardiaca",
+    "temperatura": "Temperatura",
+    "saturazione_ossigeno": "Saturazione O₂",
+    "glicemia": "Glicemia",
+}
+UNITA: Dict[str, str] = {
+    "pressione_sistolica": "mmHg",
+    "pressione_diastolica": "mmHg",
+    "frequenza_cardiaca": "bpm",
+    "temperatura": "°C",
+    "saturazione_ossigeno": "%",
+    "glicemia": "mg/dL",
+}
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 OUTPUT_DEFAULT = PROJECT_ROOT / "data" / "dashboard.html"
@@ -88,6 +111,7 @@ TAB = [
     ("training", "4. Training"),
     ("incertezza", "5. Incertezza"),
     ("riproducibilita", "6. Riproducibilità"),
+    ("interattiva", "7. Analisi interattiva"),
 ]
 
 BADGE_LABEL = {
@@ -565,6 +589,103 @@ footer {
   color: #6c757d;
   margin-top: 6px;
 }
+/* --- Pagina 7: Analisi interattiva --- */
+.form-campioni {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 12px;
+  margin-bottom: 14px;
+}
+.campo label {
+  display: block;
+  font-size: 12px;
+  color: #1b3a5b;
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+.campo input {
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid #cdd6e0;
+  border-radius: 6px;
+  font-size: 14px;
+  box-sizing: border-box;
+}
+.campo .hint {
+  display: block;
+  font-size: 11px;
+  color: #6c757d;
+  margin-top: 3px;
+}
+.toolbar-interattiva {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  margin-bottom: 16px;
+}
+.toolbar-interattiva button {
+  background: #1b3a5b;
+  color: #ffffff;
+  border: none;
+  border-radius: 4px;
+  padding: 8px 18px;
+  font-size: 14px;
+  cursor: pointer;
+}
+.toolbar-interattiva button:hover { background: #2a4d75; }
+#stato-valuta { font-size: 12px; color: #6c757d; }
+.step {
+  opacity: 0;
+  transform: translateY(8px);
+  transition: opacity .45s ease, transform .45s ease;
+  margin-bottom: 10px;
+}
+.step.show { opacity: 1; transform: none; }
+.badge-errore {
+  display: inline-block;
+  background: #495057;
+  color: #ffffff;
+  border-radius: 10px;
+  padding: 2px 8px;
+  font-size: 11px;
+  font-weight: 700;
+  margin-right: 4px;
+}
+.vettore { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0; }
+.vcell { width: 66px; text-align: center; font-size: 11px; color: #1c1e21; }
+.vbar-sfondo {
+  background: #eef1f5;
+  border-radius: 3px;
+  height: 46px;
+  position: relative;
+  overflow: hidden;
+}
+.vbar-piena {
+  position: absolute;
+  left: 0; right: 0; bottom: 0;
+  background: #1b3a5b;
+  border-radius: 3px;
+}
+.vbar-piena.neg { background: #c62828; }
+.vval { font-size: 10px; color: #495057; margin-top: 2px; }
+.vetichetta { font-size: 10px; color: #6c757d; }
+.anomalia {
+  border-left: 4px solid #ef6c00;
+  background: #ffffff;
+  padding: 6px 10px;
+  border-radius: 6px;
+  margin-bottom: 6px;
+  font-size: 13px;
+}
+.anomalia.critica { border-left-color: #c62828; }
+.pattern-item {
+  border-left: 4px solid #6a1b9a;
+  background: #ffffff;
+  padding: 6px 10px;
+  border-radius: 6px;
+  margin-bottom: 6px;
+  font-size: 13px;
+}
 """
 
 
@@ -724,6 +845,188 @@ def _js() -> str:
       });
     });
   }
+})();
+"""
+
+def _js_interattiva() -> str:
+    return """\
+(function () {
+  var FEATURES = [
+    ["pressione_sistolica", "Sist."],
+    ["pressione_diastolica", "Diast."],
+    ["frequenza_cardiaca", "FC"],
+    ["temperatura", "Temp."],
+    ["saturazione_ossigeno", "SpO2"],
+    ["glicemia", "Glic."]
+  ];
+
+  function esc(s) {
+    return String(s === null || s === undefined ? '' : s)
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+  }
+  function delay(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
+
+  function stepNode(html) {
+    var d = document.createElement('div');
+    d.className = 'step nodo';
+    d.innerHTML = html;
+    return d;
+  }
+  function badge(percorso) {
+    var map = { mlp: 'MLP', gate: 'GATE', fallback: 'FALLBACK', regole: 'REGOLE', errore: 'ERRORE' };
+    var cls = { mlp: 'badge-mlp', gate: 'badge-gate', fallback: 'badge-fallback', regole: 'badge-notifica', errore: 'badge-errore' };
+    return '<span class="' + cls[percorso] + '">' + esc(map[percorso] || percorso) + '</span>';
+  }
+  function vettore(vals, labels) {
+    var max = 1e-9;
+    vals.forEach(function (v) { max = Math.max(max, Math.abs(v)); });
+    var h = '<div class="vettore">';
+    vals.forEach(function (v, i) {
+      var pct = Math.max(2, Math.min(100, Math.abs(v) / max * 100));
+      var neg = v < 0 ? ' neg' : '';
+      var lab = labels ? labels[i] : ('#' + (i + 1));
+      h += '<div class="vcell"><div class="vbar-sfondo"><div class="vbar-piena' + neg + '" style="height:' + pct.toFixed(1) + '%"></div></div><div class="vval">' + v.toFixed(3) + '</div><div class="vetichetta">' + esc(lab) + '</div></div>';
+    });
+    return h + '</div>';
+  }
+  function barreProb(prob) {
+    if (!prob) return '';
+    var ordine = ['basso', 'medio', 'alto'];
+    var h = '<div class="barre-prob">';
+    ordine.forEach(function (c) {
+      var v = prob[c]; if (v === undefined) return;
+      var w = Math.max(0, Math.min(100, v * 100));
+      h += '<div class="barra-riga"><span class="barra-etichetta">' + c + '</span><div class="barra-sfondo"><div class="barra-piena" style="width:' + w.toFixed(1) + '%"></div></div><span class="barra-valore">' + v.toFixed(4) + '</span></div>';
+    });
+    return h + '</div>';
+  }
+  function scalaConf(conf, soglia) {
+    if (conf === null || conf === undefined) return '';
+    var pos = Math.max(0, Math.min(100, conf * 100));
+    var ps = Math.max(0, Math.min(100, soglia * 100));
+    return '<div class="scala-confidenza"><div class="scala-barra"><div class="scala-punto" style="left:' + pos.toFixed(1) + '%"></div><div class="scala-soglia" style="left:' + ps.toFixed(1) + '%">soglia ' + soglia + '</div></div></div>';
+  }
+
+  function mostraRisposta(c, dati) {
+    var r = dati.risposta || {};
+    var s = stepNode('<div class="nodo-titolo">5. Risposta finale</div>');
+    var stato = r.classe === 'alto' ? 'stato-gate' : (r.classe === 'errore' ? 'stato-errore' : 'stato-ok');
+    s.innerHTML += '<div class="nodo-esito ' + stato + '">Classe: <strong>' + esc(r.classe) + '</strong> ' + badge(r.percorso) + '</div>';
+    s.innerHTML += '<div class="nodo-esito">' + esc(r.messaggio || '') + '</div>';
+    if (r.allerta_medico) s.innerHTML += '<div class="nodo-esito stato-notifica">Allerta medica: Si</div>';
+    c.appendChild(s); s.classList.add('show');
+  }
+
+  async function mostra(dati) {
+    var c = document.getElementById('racconto');
+    c.innerHTML = '';
+    var attesa = 650;
+
+    var v = dati.validazione || {};
+    var s1 = stepNode('<div class="nodo-titolo">1. Validazione dei parametri</div>');
+    if (!v.valido) {
+      var errs = (v.errori || []).map(function (e) { return esc(e); }).join('<br>');
+      s1.innerHTML += '<div class="nodo-esito stato-errore">Input NON plausibile. Motivi:<br>' + errs + '</div>';
+      c.appendChild(s1); s1.classList.add('show');
+      await delay(attesa);
+      mostraRisposta(c, dati);
+      return;
+    }
+    s1.innerHTML += '<div class="nodo-esito stato-ok">Tutti i parametri sono entro i range fisiologici. Procedo.</div>';
+    c.appendChild(s1); s1.classList.add('show');
+    await delay(attesa);
+
+    var sg = dati.safety_gate || {};
+    var s2 = stepNode('<div class="nodo-titolo">2. Safety gate — regole cliniche</div>');
+    var anomalie = (sg.anomalie || []).map(function (a) {
+      var crit = a.gravita === 'critica';
+      return '<div class="anomalia' + (crit ? ' critica' : '') + '">' + esc(a.parametro) + ': ' + esc(a.valore) + ' (' + esc(a.direzione) + ', gravita ' + esc(a.gravita) + ')</div>';
+    }).join('') || '<div class="segnaposto">Nessuna anomalia.</div>';
+    var pattern = (sg.pattern || []).map(function (p) { return '<div class="pattern-item">' + esc(p) + '</div>'; }).join('') || '';
+    s2.innerHTML += '<div class="nodo-esito">Classe per le regole: <strong>' + esc(sg.classe_regola || '-') + '</strong></div>' + anomalie + pattern;
+    c.appendChild(s2); s2.classList.add('show');
+    await delay(attesa);
+
+    if (dati.stopped_at === 'gate') {
+      var sg2 = stepNode('<div class="nodo-titolo">3. MLP bypassato (GATE)</div><div class="nodo-esito stato-gate">Caso critico: precedenza assoluta del safety gate, MLP bypassato.</div>');
+      c.appendChild(sg2); sg2.classList.add('show');
+      await delay(attesa);
+      mostraRisposta(c, dati);
+      return;
+    }
+
+    var rete = dati.rete;
+    if (!rete) {
+      var sn = stepNode('<div class="nodo-titolo">3. Rete neurale (MLP)</div><div class="nodo-esito stato-errore">Modello non disponibile: viene usata la regola.</div>');
+      c.appendChild(sn); sn.classList.add('show');
+      await delay(attesa);
+      mostraRisposta(c, dati);
+      return;
+    }
+    var labels = FEATURES.map(function (f) { return f[1]; });
+    var s3a = stepNode('<div class="nodo-titolo">3a. Input normalizzato (scaler)</div><div class="nodo-esito">I 6 valori vengono standardizzati (media/deviazione del train).</div>' + vettore(rete.input_normalizzato, labels));
+    c.appendChild(s3a); s3a.classList.add('show'); await delay(attesa);
+
+    var s3b = stepNode('<div class="nodo-titolo">3b. Strato nascosto — pre-attivazione z1</div><div class="nodo-esito">z1 = X*W1 + b1</div>' + vettore(rete.z1, null));
+    c.appendChild(s3b); s3b.classList.add('show'); await delay(attesa);
+
+    var s3c = stepNode('<div class="nodo-titolo">3c. Attivazione ReLU a1 = max(0, z1)</div><div class="nodo-esito">I valori negativi diventano 0.</div>' + vettore(rete.a1, null));
+    c.appendChild(s3c); s3c.classList.add('show'); await delay(attesa);
+
+    var s3d = stepNode('<div class="nodo-titolo">3d. Strato di uscita — logits z2</div><div class="nodo-esito">z2 = a1*W2 + b2</div>' + vettore(rete.z2, ['basso', 'medio', 'alto']));
+    c.appendChild(s3d); s3d.classList.add('show'); await delay(attesa);
+
+    var s3e = stepNode('<div class="nodo-titolo">3e. Softmax → probabilita</div>' + barreProb(rete.probabilita));
+    c.appendChild(s3e); s3e.classList.add('show'); await delay(attesa);
+
+    var si = dati.soglia_incertezza || {};
+    var conf = (si.confidenza === null || si.confidenza === undefined) ? 0 : si.confidenza;
+    var s4 = stepNode('<div class="nodo-titolo">4. Soglia di incertezza</div>');
+    if (si.fallback) {
+      s4.innerHTML += '<div class="nodo-esito stato-fallback">Confidenza ' + Number(conf).toFixed(4) + ' &lt; soglia ' + si.soglia + ' → fallback alle regole.</div>' + scalaConf(si.confidenza, si.soglia);
+    } else {
+      s4.innerHTML += '<div class="nodo-esito stato-ok">Confidenza ' + Number(conf).toFixed(4) + ' ≥ soglia ' + si.soglia + ' → affidabile.</div>' + scalaConf(si.confidenza, si.soglia);
+    }
+    c.appendChild(s4); s4.classList.add('show'); await delay(attesa);
+
+    mostraRisposta(c, dati);
+  }
+
+  function leggiForm() {
+    var p = {};
+    FEATURES.forEach(function (f) {
+      var el = document.getElementById('in_' + f[0]);
+      var val = parseFloat(el.value);
+      p[f[0]] = isNaN(val) ? el.value : val;
+    });
+    return p;
+  }
+
+  function init() {
+    var form = document.getElementById('form-campioni');
+    if (!form) return;
+    form.addEventListener('submit', function (ev) {
+      ev.preventDefault();
+      var stato = document.getElementById('stato-valuta');
+      var c = document.getElementById('racconto');
+      c.innerHTML = '<p class="segnaposto">Analisi in corso…</p>';
+      if (stato) stato.textContent = 'Valutazione…';
+      fetch('/api/valuta', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ parametri: leggiForm() })
+      }).then(function (r) { return r.json(); }).then(function (dati) {
+        if (stato) stato.textContent = '';
+        mostra(dati);
+      }).catch(function () {
+        if (stato) stato.textContent = 'Errore di rete (serve attivo con --serve?)';
+      });
+    });
+  }
+
+  if (document.readyState !== 'loading') init();
+  else document.addEventListener('DOMContentLoaded', init);
 })();
 """
 
@@ -1139,6 +1442,38 @@ def _pannello_incertezza(
     )
 
 
+def _pannello_interattiva() -> str:
+    """Vista 7: form campione + racconto passo-passo della valutazione."""
+    campi = []
+    for nome in FEATURE_ORDER:
+        min_v, max_v = RANGE_FISIOLOGICI[nome]
+        etichetta = ETICHETTE.get(nome, nome)
+        unita = UNITA.get(nome, "")
+        campi.append(
+            f'<div class="campo">'
+            f'<label for="in_{nome}">{html.escape(etichetta)}</label>'
+            f'<input type="number" step="any" id="in_{nome}" name="{nome}" '
+            f'placeholder="{min_v}-{max_v} {html.escape(unita)}">'
+            f'<span class="hint">fisiologico {min_v}-{max_v} {html.escape(unita)}</span>'
+            f'</div>'
+        )
+    form = "".join(campi)
+    return (
+        '<section class="tab-panel" data-tab="interattiva">'
+        '<div class="card">'
+        "<h2>Analisi interattiva — inserisci un campione</h2>"
+        '<p class="nota">Inserisci 6 parametri vitali: il sistema li valuta '
+        "passo-passo, mostrando cosa succede dentro la rete fino alla risposta.</p>"
+        f'<form id="form-campioni" class="form-campioni">{form}</form>'
+        '<div class="toolbar-interattiva">'
+        '<button type="submit" form="form-campioni">Valuta</button>'
+        '<span id="stato-valuta"></span>'
+        "</div>"
+        '<div id="racconto"></div>'
+        "</div></section>"
+    )
+
+
 def genera_html(
     analisi: List[Dict[str, Any]],
     notifiche: List[Dict[str, Any]],
@@ -1207,6 +1542,8 @@ def genera_html(
             pannelli.append(_pannello_riproducibilita(metadati, avviso_metadati))
         elif chiave == "incertezza":
             pannelli.append(_pannello_incertezza(report, avviso_report, notifiche, test_dir))
+        elif chiave == "interattiva":
+            pannelli.append(_pannello_interattiva())
         else:
             pannelli.append(
                 f'<section class="tab-panel" data-tab="{chiave}">'
@@ -1241,6 +1578,9 @@ def genera_html(
 <script type="application/json" id="dati-analisi">{dati_json}</script>
 <script>
 {_js()}
+</script>
+<script>
+{_js_interattiva()}
 </script>
 </body>
 </html>
@@ -1298,14 +1638,20 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def crea_handler(db_path: Path, directory: Path):
-    """Classe handler http: file statici da ``directory`` + GET /api/analisi.
+def crea_handler(db_path: Path, directory: Path, agent=None):
+    """Classe handler http: file statici da ``directory`` + API.
 
-    L'endpoint /api/analisi restituisce il JSON dei record (stessa struttura
-    del JSON incorporato nell'HTML, inclusi ``percorso`` e ``riga_html``),
-    letto dal DB in sola lettura. Esposta per i test (porta efimera).
+    - ``GET /api/analisi``: JSON dei record dal DB (sola lettura, tab Live).
+    - ``POST /api/valuta``: riceve ``{"parametri": {...}}`` e ritorna la
+      traccia completa della pipeline (validazione -> gate -> rete ->
+      soglia -> risposta) per la pagina interattiva.
+
+    ``agent`` (SupervisedAgent) è opzionale: se omesso ne viene creato uno
+    lazy (il modello è caricato/cacheato alla prima richiesta di valutazione).
     """
     import http.server
+
+    agente = agent if agent is not None else SupervisedAgent()
 
     class Handler(http.server.SimpleHTTPRequestHandler):
         def __init__(self, *args, **kwargs):
@@ -1316,6 +1662,28 @@ def crea_handler(db_path: Path, directory: Path):
                 self._api_analisi()
                 return
             super().do_GET()
+
+        def do_POST(self):
+            if self.path != "/api/valuta":
+                self._json(404, {"errore": "risorsa non trovata"})
+                return
+            try:
+                lunghezza = int(self.headers.get("Content-Length", 0) or 0)
+                corpo = self.rfile.read(lunghezza) if lunghezza else b"{}"
+                dati = json.loads(corpo.decode("utf-8") or "{}")
+                parametri = dati.get("parametri") or {}
+                traccia = trace_analysis(parametri, agente)
+                self._json(200, traccia)
+            except Exception as exc:  # mai traceback verso il client
+                self._json(500, {"errore": str(exc)})
+
+        def _json(self, codice, oggetto):
+            corpo = json.dumps(oggetto, ensure_ascii=False).encode("utf-8")
+            self.send_response(codice)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.send_header("Content-Length", str(len(corpo)))
+            self.end_headers()
+            self.wfile.write(corpo)
 
         def _api_analisi(self):
             try:
@@ -1374,7 +1742,7 @@ def _serve(
             signal.signal(signal.SIGHUP, _arresta)
 
     porta = int(os.environ.get("PORT", "8000"))
-    handler = crea_handler(db_path, out_path.parent)
+    handler = crea_handler(db_path, out_path.parent, agent=SupervisedAgent())
     try:
         server = http.server.ThreadingHTTPServer(("127.0.0.1", porta), handler)
     except OSError as exc:
@@ -1394,6 +1762,7 @@ def _serve(
             f"Dashboard disponibile su http://127.0.0.1:{porta_reale}/{out_path.name}"
         )
         print(f"API: http://127.0.0.1:{porta_reale}/api/analisi")
+        print(f"API: http://127.0.0.1:{porta_reale}/api/valuta (POST)")
         print("Premere Ctrl+C per fermare il server.")
         thread = threading.Thread(target=server.serve_forever, daemon=True)
         thread.start()
