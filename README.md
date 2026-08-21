@@ -43,6 +43,7 @@ HW_persia_privato/
 ├── docs/
 │   └── latex/                   # Documento LaTeX didattico sugli aspetti di IA
 ├── .plans/                      # Piani di sviluppo (supervised + visualizzazione)
+├── progetto.sh                  # Script principale: test/training/analisi/dashboard/serve
 └── README.md                    # Questo file
 ```
 
@@ -143,6 +144,32 @@ solo come dipendenza di sviluppo per la dashboard.
 
 ## Come si usa
 
+### Script principale (`progetto.sh`)
+
+Tutte le operazioni comuni sono gestite da un unico script alla root del
+repository (funziona da qualsiasi directory corrente; richiede solo bash e
+python3):
+
+```bash
+./progetto.sh test              # suite principale (129 test) + regressione legacy (14)
+./progetto.sh train             # training: rigenera artifact MLP + report.json
+./progetto.sh analisi '<json>'  # analizza un paziente via CLI (persiste su SQLite)
+./progetto.sh dashboard         # genera la dashboard statica (data/dashboard.html)
+./progetto.sh serve [porta]     # dashboard + API su http://127.0.0.1:<porta> (default 8000)
+./progetto.sh help              # aiuto completo
+```
+
+Esempio di analisi runtime:
+
+```bash
+./progetto.sh analisi '{"pressione_sistolica":120,"pressione_diastolica":80,"frequenza_cardiaca":75,"temperatura":36.8,"saturazione_ossigeno":98,"glicemia":95}'
+```
+
+Nota: la tab **"7. Analisi interattiva"** della dashboard richiede
+`./progetto.sh serve` — l'endpoint `POST /api/valuta` esiste solo con il
+server attivo. I comandi manuali qui sotto restano validi e mostrano cosa lo
+script fa sotto il cofano.
+
 ### Test
 
 ```bash
@@ -164,7 +191,7 @@ python main.py --build-ml
 python main.py -ML --parametri '{"pressione_sistolica":120,"pressione_diastolica":80,"frequenza_cardiaca":75,"temperatura":36.8,"saturazione_ossigeno":98,"glicemia":95}'
 ```
 
-### Dashboard di visualizzazione (6 viste didattiche)
+### Dashboard di visualizzazione (7 viste didattiche)
 
 ```bash
 cd supervised_telemedicina
@@ -176,7 +203,10 @@ python tools/genera_dashboard.py --serve   # + endpoint /api/analisi
 
 La dashboard mostra: analisi live con badge, flusso decisionale interattivo,
 teacher vs MLP (heatmap, errori), training (curve loss), incertezza
-(istogramma confidenze, mancati) e riproducibilità (seed e hash).
+(istogramma confidenze, mancati), riproducibilità (seed e hash) e una
+**pagina interattiva** in cui l'utente inserisce un campione e vede
+passo-passo come viene valutato (validazione → safety gate → rete → soglia →
+risposta; richiede `--serve`).
 
 ### Documento LaTeX sugli aspetti di IA
 
@@ -215,5 +245,7 @@ progetto (`genera_figure.py`).
 
 - **Fasi 0-8 del progetto**: complete (piano in `supervised_mlp_telemedicina.md`).
 - **Dashboard di visualizzazione (V1-V4)**: completa e integrata su `main`.
+- **Pagina interattiva + script principale**: tab 7 con valutazione
+  passo-passo del campione; `progetto.sh` come punto d'ingresso unico.
 - **Suite**: 129/129 test OK; regressione legacy 14/14.
 - **Documento LaTeX**: compilato (45 pagine, 11 capitoli).
