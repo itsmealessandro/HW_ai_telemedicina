@@ -87,7 +87,12 @@ _MESSAGGI_CLASSE: Dict[str, str] = {
 
 
 class SupervisedAgent:
-    """Classificatore con precedenza assoluta del safety gate."""
+    """Classificatore con precedenza assoluta del safety gate.
+
+    Con ``gate=False`` (``predict``) il gate viene bypassato: è la
+    "modalità diagnostica", per confrontare la decisione dell'MLP con
+    quella delle regole. Il default resta sempre il gate attivo.
+    """
 
     def __init__(
         self,
@@ -166,7 +171,23 @@ class SupervisedAgent:
             pattern=list(dettagli["pattern"]),
         )
 
-    def predict(self, parametri: Any) -> AgentOutcome:
+    def predict(self, parametri: Any, gate: bool = True) -> AgentOutcome:
+        """Classifica i parametri vitali.
+
+        Args:
+            parametri: mapping (dict) o oggetto con i 6 attributi ufficiali.
+            gate: se True (default) il safety gate rule-based ha precedenza
+                assoluta e un caso critico non consulta mai l'MLP. Se False
+                (modalità diagnostica) il gate viene bypassato: l'MLP decide
+                sempre (classe finale = classe MLP, nessun merge né override)
+                e la classe delle regole resta registrata in ``classe_regola``
+                per il confronto. Gli errori di validazione restano comunque
+                un esito errore; se modello o inferenza non sono disponibili
+                si ricade sulle regole come nel percorso non critico.
+
+        Returns:
+            AgentOutcome con la classe finale e i metadati della decisione.
+        """
         dettagli = analizza(parametri)
         if not dettagli["valido"]:
             return self._base(dettagli, errore=True)
@@ -174,7 +195,7 @@ class SupervisedAgent:
         base = self._base(dettagli)
         # Critical and pattern-dangerous outcomes are returned byte-for-byte
         # at the established fields; only additive metadata is populated.
-        if dettagli["classe"] == "alto":
+        if gate and dettagli["classe"] == "alto":
             return base
 
         modello, motivo = self._carica()
@@ -212,6 +233,28 @@ class SupervisedAgent:
         indice_mlp = int(np.argmax(probabilita_array))
         classe_mlp = CLASSI[indice_mlp]
         confidenza = float(probabilita_array[indice_mlp])
+
+        if not gate:
+            # Modalità diagnostica: decide solo l'MLP — nessun merge
+            # max(regole, MLP), nessun override, nessun fallback sulla
+            # soglia di incertezza. Il messaggio resta pulito: i pattern
+            # delle regole appartengono al gate, non alla risposta MLP.
+            return AgentOutcome(
+                classe=classe_mlp,
+                probabilita=probabilita,
+                errore=False,
+                messaggio=_MESSAGGI_CLASSE[classe_mlp],
+                modello_usato=True,
+                classe_mlp=classe_mlp,
+                classe_regola=base.classe,
+                confidenza=confidenza,
+                override_sicurezza=False,
+                fallback=False,
+                motivo_fallback=None,
+                anomalie=list(dettagli["anomalie"]),
+                pattern=list(dettagli["pattern"]),
+            )
+
         base.modello_usato = True
         base.classe_mlp = classe_mlp
         base.classe_regola = base.classe

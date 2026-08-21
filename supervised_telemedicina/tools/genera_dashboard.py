@@ -69,6 +69,9 @@ from telemedicina_supervised.agents.trace import trace_analysis  # noqa: E402
 from telemedicina_supervised.safety.safety_rules import (  # noqa: E402
     FEATURE_ORDER,
     RANGE_FISIOLOGICI,
+    RANGE_NORMALI,
+    SOGLIE_CRITICHE,
+    SOGLIE_MODERATE,
 )
 
 ETICHETTE: Dict[str, str] = {
@@ -633,7 +636,16 @@ footer {
   cursor: pointer;
 }
 .toolbar-interattiva button:hover { background: #2a4d75; }
+.toolbar-interattiva button.secondario { background: #6c757d; }
+.toolbar-interattiva button.secondario:hover { background: #495057; }
 #stato-valuta { font-size: 12px; color: #6c757d; }
+.check-gate {
+  font-size: 12px;
+  color: #495057;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
 .step {
   opacity: 0;
   transform: translateY(8px);
@@ -685,6 +697,70 @@ footer {
   border-radius: 6px;
   margin-bottom: 6px;
   font-size: 13px;
+}
+.spiega {
+  font-size: 13px;
+  color: #37474f;
+  margin: 6px 0 8px;
+  line-height: 1.5;
+}
+.spiega em { color: #1b3a5b; font-style: italic; }
+.barra-range { margin: 8px 0 12px; }
+.br-intestazione {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  font-size: 12px;
+  color: #1b3a5b;
+}
+.br-track {
+  position: relative;
+  height: 10px;
+  border-radius: 5px;
+  background: #e3e6ea;
+  margin-top: 14px;
+}
+.br-seg { position: absolute; top: 0; bottom: 0; }
+.br-marker {
+  position: absolute;
+  top: -3px;
+  width: 4px;
+  height: 16px;
+  background: #0d1b2a;
+  border-radius: 2px;
+  box-shadow: 0 0 0 2px #ffffff;
+}
+.br-estremi {
+  display: flex;
+  justify-content: space-between;
+  font-size: 10px;
+  color: #6c757d;
+  margin-top: 3px;
+}
+.legenda {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  font-size: 11px;
+  color: #495057;
+  margin: 10px 0 2px;
+}
+.legenda .chip {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+  margin-right: 4px;
+  vertical-align: -1px;
+}
+.rete-figura { text-align: center; margin: 10px 0; }
+.rete-figura svg { max-width: 100%; height: auto; }
+.rete-figcaption { font-size: 11px; color: #6c757d; margin-top: 4px; }
+.nota-attivi {
+  font-size: 12px;
+  color: #1b3a5b;
+  font-weight: 600;
+  margin: 6px 0;
 }
 """
 
@@ -852,13 +928,20 @@ def _js_interattiva() -> str:
     return """\
 (function () {
   var FEATURES = [
-    ["pressione_sistolica", "Sist."],
-    ["pressione_diastolica", "Diast."],
-    ["frequenza_cardiaca", "FC"],
-    ["temperatura", "Temp."],
-    ["saturazione_ossigeno", "SpO2"],
-    ["glicemia", "Glic."]
+    ["pressione_sistolica", "Sist.", "Pressione sistolica", "mmHg"],
+    ["pressione_diastolica", "Diast.", "Pressione diastolica", "mmHg"],
+    ["frequenza_cardiaca", "FC", "Frequenza cardiaca", "bpm"],
+    ["temperatura", "Temp.", "Temperatura", "°C"],
+    ["saturazione_ossigeno", "SpO2", "Saturazione O₂", "%"],
+    ["glicemia", "Glic.", "Glicemia", "mg/dL"]
   ];
+
+  var ESEMPI = [
+    { nome: "paziente a basso rischio", valori: { pressione_sistolica: 120, pressione_diastolica: 80, frequenza_cardiaca: 75, temperatura: 36.5, saturazione_ossigeno: 98, glicemia: 95 } },
+    { nome: "paziente a medio rischio", valori: { pressione_sistolica: 150, pressione_diastolica: 92, frequenza_cardiaca: 105, temperatura: 37.0, saturazione_ossigeno: 96, glicemia: 110 } },
+    { nome: "paziente ad alto rischio", valori: { pressione_sistolica: 185, pressione_diastolica: 115, frequenza_cardiaca: 125, temperatura: 38.8, saturazione_ossigeno: 86, glicemia: 210 } }
+  ];
+  var indiceEsempio = 0;
 
   function esc(s) {
     return String(s === null || s === undefined ? '' : s)
@@ -908,13 +991,134 @@ def _js_interattiva() -> str:
     return '<div class="scala-confidenza"><div class="scala-barra"><div class="scala-punto" style="left:' + pos.toFixed(1) + '%"></div><div class="scala-soglia" style="left:' + ps.toFixed(1) + '%">soglia ' + soglia + '</div></div></div>';
   }
 
+  var COLORI_ZONA = { normale: '#2e7d32', moderata: '#ef6c00', critica: '#c62828', fuori: '#757575' };
+
+  function zona(v, s) {
+    var fis = s.fisiologico, cri = s.critica, mod = s.moderata;
+    if (v < fis[0] || v > fis[1]) return 'fuori';
+    if ((cri.alta !== null && v >= cri.alta) || (cri.bassa !== null && v <= cri.bassa)) return 'critica';
+    if ((mod.alta !== null && v >= mod.alta) || (mod.bassa !== null && v <= mod.bassa)) return 'moderata';
+    return 'normale';
+  }
+
+  function barraRange(chiave, valore, s, meta) {
+    if (!s) return '';
+    var fis = s.fisiologico;
+    var val = Number(valore);
+    var bs = [fis[0], s.critica.bassa, s.moderata.bassa, s.normale[0], s.normale[1], s.moderata.alta, s.critica.alta, fis[1]]
+      .filter(function (x) { return x !== null && x !== undefined; })
+      .filter(function (x, i, arr) { return arr.indexOf(x) === i; })
+      .sort(function (a, b) { return a - b; });
+    var segs = '';
+    for (var i = 0; i < bs.length - 1; i++) {
+      var mid = (bs[i] + bs[i + 1]) / 2;
+      var left = (bs[i] - fis[0]) / (fis[1] - fis[0]) * 100;
+      var larg = (bs[i + 1] - bs[i]) / (fis[1] - fis[0]) * 100;
+      segs += '<div class="br-seg" style="left:' + left.toFixed(2) + '%;width:' + larg.toFixed(2) + '%;background:' + COLORI_ZONA[zona(mid, s)] + '"></div>';
+    }
+    var pos = Math.max(0, Math.min(100, (val - fis[0]) / (fis[1] - fis[0]) * 100));
+    return '<div class="barra-range">'
+      + '<div class="br-intestazione"><span>' + esc(meta[2]) + '</span><span><strong>' + String(valore) + '</strong> ' + esc(meta[3]) + '</span></div>'
+      + '<div class="br-track">' + segs + '<div class="br-marker" style="left:' + pos.toFixed(2) + '%"></div></div>'
+      + '<div class="br-estremi"><span>' + fis[0] + '</span><span>' + fis[1] + '</span></div>'
+      + '</div>';
+  }
+
+  function legendaZone() {
+    return '<div class="legenda">'
+      + '<span><span class="chip" style="background:#2e7d32"></span>nella norma</span>'
+      + '<span><span class="chip" style="background:#ef6c00"></span>anomalia moderata</span>'
+      + '<span><span class="chip" style="background:#c62828"></span>anomalia critica</span>'
+      + '<span><span class="chip" style="background:#757575"></span>fuori range fisiologico</span>'
+      + '</div>';
+  }
+
+  function schemaRete(rete, input, labels) {
+    var a1 = rete.a1;
+    var nIn = 6, nH = a1.length, nOut = 3;
+    var passoH = 13;
+    var passoIn = Math.min(40, (nH * passoH) / nIn);
+    var passoOut = Math.min(52, (nH * passoH) / nOut);
+    var yTop = 36, margineInf = 16;
+    var h = Math.max(yTop + nH * passoH + margineInf + 10, 240);
+    var w = 380;
+    var xIn = 92, xHid = w / 2, xOut = w - 74;
+    var yBot = h - margineInf;
+    function centri(n, passo) {
+      var tot = (n - 1) * passo;
+      var start = (yTop + yBot - tot) / 2;
+      var arr = [];
+      for (var i = 0; i < n; i++) arr.push(start + i * passo);
+      return arr;
+    }
+    var yIn = centri(nIn, passoIn), yHid = centri(nH, passoH), yOut = centri(nOut, passoOut);
+    var classeOrdine = ['basso', 'medio', 'alto'];
+    var predIdx = 0, bestP = -1;
+    classeOrdine.forEach(function (cl, i) {
+      var p = rete.probabilita ? rete.probabilita[cl] : 0;
+      if (p !== undefined && p > bestP) { bestP = p; predIdx = i; }
+    });
+    var outFill = ['#2e7d32', '#ef6c00', '#c62828'];
+    var svg = '<svg width="' + w + '" height="' + h + '" viewBox="0 0 ' + w + ' ' + h + '" role="img" aria-label="Grafo della rete neurale">';
+    // Connessioni (disegnate sotto i nodi): più opache verso i neuroni accesi.
+    for (var i = 0; i < nIn; i++) {
+      for (var j = 0; j < nH; j++) {
+        var op = a1[j] > 0 ? 0.22 : 0.07;
+        svg += '<line x1="' + xIn + '" y1="' + yIn[i].toFixed(1) + '" x2="' + xHid + '" y2="' + yHid[j].toFixed(1) + '" stroke="#90a4ae" stroke-width="0.6" opacity="' + op + '"/>';
+      }
+    }
+    for (var j2 = 0; j2 < nH; j2++) {
+      for (var k = 0; k < nOut; k++) {
+        var op2 = a1[j2] > 0 ? 0.22 : 0.07;
+        svg += '<line x1="' + xHid + '" y1="' + yHid[j2].toFixed(1) + '" x2="' + xOut + '" y2="' + yOut[k].toFixed(1) + '" stroke="#90a4ae" stroke-width="0.6" opacity="' + op2 + '"/>';
+      }
+    }
+    // Didascalie di colonna.
+    svg += '<text x="' + xIn + '" y="18" text-anchor="middle" font-size="10" font-weight="bold" fill="#1b3a5b">ingressi (6)</text>';
+    svg += '<text x="' + xHid + '" y="18" text-anchor="middle" font-size="10" font-weight="bold" fill="#1b3a5b">strato nascosto (' + nH + ') — ReLU</text>';
+    svg += '<text x="' + xOut + '" y="18" text-anchor="middle" font-size="10" font-weight="bold" fill="#1b3a5b">uscite (3)</text>';
+    // Nodi di ingresso: etichetta + tooltip con valore grezzo e normalizzato.
+    for (var i2 = 0; i2 < nIn; i2++) {
+      svg += '<circle cx="' + xIn + '" cy="' + yIn[i2].toFixed(1) + '" r="7" fill="#1b3a5b">'
+        + '<title>' + esc(labels[i2]) + ' — valore ' + esc(input[FEATURES[i2][0]]) + ' ' + esc(FEATURES[i2][3])
+        + ' (normalizzato ' + Number(rete.input_normalizzato[i2]).toFixed(2) + ')</title></circle>';
+      svg += '<text x="' + (xIn - 12) + '" y="' + (yIn[i2] + 3).toFixed(1) + '" text-anchor="end" font-size="9" fill="#37474f">' + esc(labels[i2]) + '</text>';
+    }
+    // Nodi nascosti: blu se accesi (a1 > 0), grigi se la ReLU li ha azzerati.
+    for (var j3 = 0; j3 < nH; j3++) {
+      var acceso = a1[j3] > 0;
+      svg += '<circle cx="' + xHid + '" cy="' + yHid[j3].toFixed(1) + '" r="5" fill="' + (acceso ? '#1565c0' : '#cfd8dc') + '">'
+        + '<title>Neurone #' + (j3 + 1) + ' — ' + (acceso ? 'acceso (a1 = ' + a1[j3].toFixed(3) + ')' : 'spento (a1 = 0: z1 era negativo, la ReLU lo ha azzerato)') + '</title></circle>';
+    }
+    // Nodi di uscita: colori per classe, anello sulla classe predetta.
+    for (var k2 = 0; k2 < nOut; k2++) {
+      var pred = k2 === predIdx;
+      var prob = rete.probabilita ? rete.probabilita[classeOrdine[k2]] : null;
+      svg += '<circle cx="' + xOut + '" cy="' + yOut[k2].toFixed(1) + '" r="9" fill="' + outFill[k2] + '"' + (pred ? ' stroke="#0d1b2a" stroke-width="2.5"' : '') + '>'
+        + '<title>' + classeOrdine[k2] + ' — probabilità ' + (prob === null || prob === undefined ? '—' : Number(prob).toFixed(4)) + (pred ? ' ← classe predetta' : '') + '</title></circle>';
+      svg += '<text x="' + (xOut + 14) + '" y="' + (yOut[k2] + 3).toFixed(1) + '" font-size="10" ' + (pred ? 'font-weight="bold" fill="#0d1b2a"' : 'fill="#6c757d"') + '>' + classeOrdine[k2] + (pred ? ' ★' : '') + '</text>';
+    }
+    return svg + '</svg>';
+  }
+
+  function legendaRete() {
+    return '<div class="legenda">'
+      + '<span><span class="chip" style="background:#1b3a5b"></span>ingresso (valore misurato)</span>'
+      + '<span><span class="chip" style="background:#1565c0"></span>neurone acceso (a1 &gt; 0)</span>'
+      + '<span><span class="chip" style="background:#cfd8dc"></span>neurone spento (a1 = 0)</span>'
+      + '<span><span class="chip" style="background:#ffffff;border:2px solid #0d1b2a;width:8px;height:8px;border-radius:50%"></span>classe predetta</span>'
+      + '</div>';
+  }
+
   function mostraRisposta(c, dati) {
     var r = dati.risposta || {};
-    var s = stepNode('<div class="nodo-titolo">5. Risposta finale</div>');
+    var s = stepNode('<div class="nodo-titolo">5. Risposta finale</div>'
+      + '<div class="spiega">La classe finale non è semplicemente quella della rete: vale la regola di sicurezza <em>max(regole, MLP)</em>. Se le regole indicano un rischio più alto di quello predetto dalla rete, vincono loro (override di sicurezza); il messaggio al paziente e l’eventuale allerta medica derivano dalla classe risultante.</div>');
     var stato = r.classe === 'alto' ? 'stato-gate' : (r.classe === 'errore' ? 'stato-errore' : 'stato-ok');
     s.innerHTML += '<div class="nodo-esito ' + stato + '">Classe: <strong>' + esc(r.classe) + '</strong> ' + badge(r.percorso) + '</div>';
     s.innerHTML += '<div class="nodo-esito">' + esc(r.messaggio || '') + '</div>';
-    if (r.allerta_medico) s.innerHTML += '<div class="nodo-esito stato-notifica">Allerta medica: Si</div>';
+    if (r.allerta_medico) s.innerHTML += '<div class="nodo-esito stato-notifica">Allerta medica: Sì</div>';
+    if (r.override_sicurezza) s.innerHTML += '<div class="nodo-esito stato-gate">Override di sicurezza: le regole hanno prevalso sull’MLP.</div>';
     c.appendChild(s); s.classList.add('show');
   }
 
@@ -922,34 +1126,48 @@ def _js_interattiva() -> str:
     var c = document.getElementById('racconto');
     c.innerHTML = '';
     var attesa = 650;
-
+    var input = dati.input || {};
     var v = dati.validazione || {};
-    var s1 = stepNode('<div class="nodo-titolo">1. Validazione dei parametri</div>');
+    var soglie = v.soglie || {};
+
+    var s1 = stepNode('<div class="nodo-titolo">1. Validazione dei parametri</div>'
+      + '<div class="spiega">Prima di qualunque modello, il sistema controlla che i valori siano <em>fisiologicamente possibili</em> per un essere umano — non "normali": possibili. Una misurazione impossibile (per esempio una pressione di 5000) non è un rischio alto: è un errore di misura e viene rifiutata senza consultare né regole né rete. Vale anche il vincolo strutturale sistolica &gt; diastolica.</div>');
     if (!v.valido) {
       var errs = (v.errori || []).map(function (e) { return esc(e); }).join('<br>');
       s1.innerHTML += '<div class="nodo-esito stato-errore">Input NON plausibile. Motivi:<br>' + errs + '</div>';
+      s1.innerHTML += FEATURES.map(function (f) { return barraRange(f[0], input[f[0]], soglie[f[0]], f); }).join('');
+      s1.innerHTML += legendaZone();
       c.appendChild(s1); s1.classList.add('show');
       await delay(attesa);
       mostraRisposta(c, dati);
       return;
     }
-    s1.innerHTML += '<div class="nodo-esito stato-ok">Tutti i parametri sono entro i range fisiologici. Procedo.</div>';
+    s1.innerHTML += '<div class="nodo-esito stato-ok">Tutti i valori sono entro i range fisiologici: campione plausibile, si prosegue.</div>';
+    s1.innerHTML += FEATURES.map(function (f) { return barraRange(f[0], input[f[0]], soglie[f[0]], f); }).join('');
+    s1.innerHTML += legendaZone();
     c.appendChild(s1); s1.classList.add('show');
     await delay(attesa);
 
     var sg = dati.safety_gate || {};
-    var s2 = stepNode('<div class="nodo-titolo">2. Safety gate — regole cliniche</div>');
+    var gateDisattivato = sg.attivo === false;
+    var s2 = stepNode('<div class="nodo-titolo">2. Safety gate — regole cliniche (il teacher)</div>'
+      + '<div class="spiega">Un esperto ha scritto a mano le regole cliniche: range normali, soglie moderate e critiche per ogni parametro, più pattern di correlazione pericolosi (per esempio ipotensione + tachicardia = shock). Questo classificatore a regole è trasparente al 100% — ogni decisione si può leggere e spiegare — e ha <em>precedenza assoluta</em>: se dichiara il caso critico, la rete neurale non viene nemmeno consultata.</div>');
     var anomalie = (sg.anomalie || []).map(function (a) {
       var crit = a.gravita === 'critica';
-      return '<div class="anomalia' + (crit ? ' critica' : '') + '">' + esc(a.parametro) + ': ' + esc(a.valore) + ' (' + esc(a.direzione) + ', gravita ' + esc(a.gravita) + ')</div>';
-    }).join('') || '<div class="segnaposto">Nessuna anomalia.</div>';
-    var pattern = (sg.pattern || []).map(function (p) { return '<div class="pattern-item">' + esc(p) + '</div>'; }).join('') || '';
-    s2.innerHTML += '<div class="nodo-esito">Classe per le regole: <strong>' + esc(sg.classe_regola || '-') + '</strong></div>' + anomalie + pattern;
+      return '<div class="anomalia' + (crit ? ' critica' : '') + '">' + esc(a.parametro) + ': ' + esc(a.valore) + ' (' + esc(a.direzione) + ', gravità ' + esc(a.gravita) + ')</div>';
+    }).join('') || '<div class="segnaposto">Nessuna anomalia: tutti i valori nel range normale.</div>';
+    var pattern = (sg.pattern || []).map(function (p) { return '<div class="pattern-item">' + esc(p) + '</div>'; }).join('');
+    s2.innerHTML += '<div class="nodo-esito">Verdetto delle regole: <strong>' + esc(sg.classe_regola || '-') + '</strong></div>' + anomalie + pattern;
+    if (gateDisattivato) {
+      s2.innerHTML += '<div class="nodo-esito stato-ok">Safety gate DISATTIVATO (modalità diagnostica): il verdetto delle regole è mostrato solo come confronto, la decisione finale spetta all’MLP.</div>';
+    }
     c.appendChild(s2); s2.classList.add('show');
     await delay(attesa);
 
-    if (dati.stopped_at === 'gate') {
-      var sg2 = stepNode('<div class="nodo-titolo">3. MLP bypassato (GATE)</div><div class="nodo-esito stato-gate">Caso critico: precedenza assoluta del safety gate, MLP bypassato.</div>');
+    if (!gateDisattivato && dati.stopped_at === 'gate') {
+      var sg2 = stepNode('<div class="nodo-titolo">3. MLP bypassato (GATE)</div>'
+        + '<div class="spiega">Le regole hanno rilevato una condizione critica, quindi il caso non passa dalla rete: per costruzione un caso "alto" non può mai essere declassato dall’MLP. Il richiamo di sistema sui casi critici è 1.0 — è la rete di sicurezza del progetto.</div>'
+        + '<div class="nodo-esito stato-gate">Caso critico: precedenza assoluta del safety gate, MLP bypassato.</div>');
       c.appendChild(sg2); sg2.classList.add('show');
       await delay(attesa);
       mostraRisposta(c, dati);
@@ -965,28 +1183,44 @@ def _js_interattiva() -> str:
       return;
     }
     var labels = FEATURES.map(function (f) { return f[1]; });
-    var s3a = stepNode('<div class="nodo-titolo">3a. Input normalizzato (scaler)</div><div class="nodo-esito">I 6 valori vengono standardizzati (media/deviazione del train).</div>' + vettore(rete.input_normalizzato, labels));
+
+    var s3a = stepNode('<div class="nodo-titolo">3a. Input normalizzato (scaler)</div>'
+      + '<div class="spiega">I 6 parametri hanno unità diverse (mmHg, bpm, °C…): così come sono non sono confrontabili tra loro. Lo scaler li standardizza con la formula (x − media) / deviazione_standard, calcolata sul solo training set. Nella scala risultante 0 significa "esattamente la media", +2 "molto sopra la media", −1.5 "sotto la media".</div>'
+      + vettore(rete.input_normalizzato, labels));
     c.appendChild(s3a); s3a.classList.add('show'); await delay(attesa);
 
-    var s3b = stepNode('<div class="nodo-titolo">3b. Strato nascosto — pre-attivazione z1</div><div class="nodo-esito">z1 = X*W1 + b1</div>' + vettore(rete.z1, null));
+    var s3b = stepNode('<div class="nodo-titolo">3b. Strato nascosto — pre-attivazione z1</div>'
+      + '<div class="spiega">Ognuno dei ' + rete.z1.length + ' neuroni nascosti calcola una somma pesata degli ingressi — i pesi W1 sono le "manopole" regolate dal training — più un proprio termine di bias: z1 = X·W1ᵀ + b1. Ogni numero è il punteggio di un neurone <em>prima</em> dell’attivazione.</div>'
+      + '<div class="rete-figura">' + schemaRete(rete, input, labels) + '<div class="rete-figcaption">Grafo della rete: ogni colonna è uno strato; passa il mouse sui pallini per stato e valori. Blu = neurone acceso dalla ReLU, anello scuro = classe predetta.</div></div>'
+      + legendaRete()
+      + vettore(rete.z1, null));
     c.appendChild(s3b); s3b.classList.add('show'); await delay(attesa);
 
-    var s3c = stepNode('<div class="nodo-titolo">3c. Attivazione ReLU a1 = max(0, z1)</div><div class="nodo-esito">I valori negativi diventano 0.</div>' + vettore(rete.a1, null));
+    var attivi = rete.a1.filter(function (x) { return x > 0; }).length;
+    var s3c = stepNode('<div class="nodo-titolo">3c. Attivazione ReLU: a1 = max(0, z1)</div>'
+      + '<div class="spiega">La ReLU è la funzione di attivazione: tronca i valori negativi a zero, quindi solo i neuroni con segnale positivo "si accendono" e trasferiscono il loro contributo allo strato successivo. È questa non-linearità che permette alla rete di apprendere confini decisionali complessi, non soltanto rette.</div>'
+      + '<div class="nota-attivi">Neuroni accesi: ' + attivi + ' su ' + rete.a1.length + '</div>'
+      + vettore(rete.a1, null));
     c.appendChild(s3c); s3c.classList.add('show'); await delay(attesa);
 
-    var s3d = stepNode('<div class="nodo-titolo">3d. Strato di uscita — logits z2</div><div class="nodo-esito">z2 = a1*W2 + b2</div>' + vettore(rete.z2, ['basso', 'medio', 'alto']));
+    var s3d = stepNode('<div class="nodo-titolo">3d. Strato di uscita — logits z2</div>'
+      + '<div class="spiega">Il secondo strato combina le attivazioni dei neuroni accesi in 3 punteggi grezzi (logit), uno per classe di rischio: z2 = a1·W2ᵀ + b2. Il logit più alto indica la classe favorita; la distanza tra i logit dice quanto la rete è netta.</div>'
+      + vettore(rete.z2, ['basso', 'medio', 'alto']));
     c.appendChild(s3d); s3d.classList.add('show'); await delay(attesa);
 
-    var s3e = stepNode('<div class="nodo-titolo">3e. Softmax → probabilita</div>' + barreProb(rete.probabilita));
+    var s3e = stepNode('<div class="nodo-titolo">3e. Softmax → probabilità</div>'
+      + '<div class="spiega">La softmax eleva a esponenziale i logit e li divide per la loro somma: il risultato è una distribuzione di probabilità la cui somma fa esattamente 1. Logit molto distanti → confidenza alta; logit simili → la rete è indecisa.</div>'
+      + barreProb(rete.probabilita));
     c.appendChild(s3e); s3e.classList.add('show'); await delay(attesa);
 
     var si = dati.soglia_incertezza || {};
     var conf = (si.confidenza === null || si.confidenza === undefined) ? 0 : si.confidenza;
-    var s4 = stepNode('<div class="nodo-titolo">4. Soglia di incertezza</div>');
+    var s4 = stepNode('<div class="nodo-titolo">4. Soglia di incertezza</div>'
+      + '<div class="spiega">Il sistema conosce i propri limiti: se la probabilità massima scende sotto ' + si.soglia + ', non si fida della rete e ricade sulle regole testuali (fallback). È la "zona di incertezza": meglio una risposta trasparente basata su regole che una risposta sicura ma sbagliata.</div>');
     if (si.fallback) {
       s4.innerHTML += '<div class="nodo-esito stato-fallback">Confidenza ' + Number(conf).toFixed(4) + ' &lt; soglia ' + si.soglia + ' → fallback alle regole.</div>' + scalaConf(si.confidenza, si.soglia);
     } else {
-      s4.innerHTML += '<div class="nodo-esito stato-ok">Confidenza ' + Number(conf).toFixed(4) + ' ≥ soglia ' + si.soglia + ' → affidabile.</div>' + scalaConf(si.confidenza, si.soglia);
+      s4.innerHTML += '<div class="nodo-esito stato-ok">Confidenza ' + Number(conf).toFixed(4) + ' ≥ soglia ' + si.soglia + ' → la risposta della rete è affidabile.</div>' + scalaConf(si.confidenza, si.soglia);
     }
     c.appendChild(s4); s4.classList.add('show'); await delay(attesa);
 
@@ -1006,6 +1240,20 @@ def _js_interattiva() -> str:
   function init() {
     var form = document.getElementById('form-campioni');
     if (!form) return;
+    var btnEsempio = document.getElementById('btn-esempio');
+    if (btnEsempio) {
+      btnEsempio.addEventListener('click', function () {
+        var es = ESEMPI[indiceEsempio % ESEMPI.length];
+        indiceEsempio++;
+        FEATURES.forEach(function (f) {
+          var el = document.getElementById('in_' + f[0]);
+          if (el) el.value = es.valori[f[0]];
+        });
+        var posizione = ((indiceEsempio - 1) % ESEMPI.length) + 1;
+        var stato = document.getElementById('stato-valuta');
+        if (stato) stato.textContent = 'Esempio ' + posizione + '/' + ESEMPI.length + ': ' + es.nome + '. Premi Valuta per analizzarlo.';
+      });
+    }
     form.addEventListener('submit', function (ev) {
       ev.preventDefault();
       var stato = document.getElementById('stato-valuta');
@@ -1015,7 +1263,7 @@ def _js_interattiva() -> str:
       fetch('/api/valuta', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ parametri: leggiForm() })
+        body: JSON.stringify({ parametri: leggiForm(), gate: document.getElementById('gateAttivo').checked })
       }).then(function (r) { return r.json(); }).then(function (dati) {
         if (stato) stato.textContent = '';
         mostra(dati);
@@ -1442,7 +1690,17 @@ def _pannello_incertezza(
     )
 
 
-def _pannello_interattiva() -> str:
+def _fmt_soglia(soglia: Dict[str, Any]) -> str:
+    """Formatta una coppia di soglie {'alta': x|None, 'bassa': y|None}."""
+    parti = []
+    if soglia.get("alta") is not None:
+        parti.append(f"≥ {soglia['alta']}")
+    if soglia.get("bassa") is not None:
+        parti.append(f"≤ {soglia['bassa']}")
+    return " · ".join(parti) if parti else "—"
+
+
+def _pannello_interattiva(gate_default: bool = True) -> str:
     """Vista 7: form campione + racconto passo-passo della valutazione."""
     campi = []
     for nome in FEATURE_ORDER:
@@ -1458,6 +1716,17 @@ def _pannello_interattiva() -> str:
             f'</div>'
         )
     form = "".join(campi)
+
+    righe_soglie = ""
+    for nome in FEATURE_ORDER:
+        nor = RANGE_NORMALI[nome]
+        righe_soglie += (
+            f"<tr><td>{html.escape(ETICHETTE.get(nome, nome))}</td>"
+            f"<td>{nor[0]}–{nor[1]}</td>"
+            f"<td>{_fmt_soglia(SOGLIE_MODERATE[nome])}</td>"
+            f"<td>{_fmt_soglia(SOGLIE_CRITICHE[nome])}</td></tr>"
+        )
+
     return (
         '<section class="tab-panel" data-tab="interattiva">'
         '<div class="card">'
@@ -1467,9 +1736,20 @@ def _pannello_interattiva() -> str:
         f'<form id="form-campioni" class="form-campioni">{form}</form>'
         '<div class="toolbar-interattiva">'
         '<button type="submit" form="form-campioni">Valuta</button>'
+        '<button type="button" id="btn-esempio" class="secondario" title="Clicca di nuovo per ciclare: basso → medio → alto rischio">Esempio</button>'
+        f'<label class="check-gate"><input type="checkbox" id="gateAttivo"{" checked" if gate_default else ""}> '
+        "Safety gate attivo (disattiva per modalità diagnostica: decide solo l'MLP)</label>"
         '<span id="stato-valuta"></span>'
         "</div>"
         '<div id="racconto"></div>'
+        "<h3>Soglie dei gate (riferimento)</h3>"
+        '<table class="tabella-live"><thead><tr><th>Parametro</th><th>Normale</th>'
+        "<th>Moderata</th><th>Critica</th></tr></thead>"
+        f"<tbody>{righe_soglie}</tbody></table>"
+        '<p class="nota">La validazione controlla solo che i valori siano '
+        "fisiologicamente <em>possibili</em>; il safety gate classifica con "
+        "queste soglie: qualunque anomalia → medio, anomalia critica o "
+        "pattern di correlazione → alto (MLP bypassato).</p>"
         "</div></section>"
     )
 
@@ -1483,6 +1763,7 @@ def genera_html(
     report: Optional[Dict[str, Any]] = None,
     avviso_report: Optional[str] = None,
     test_dir: Optional[Path] = None,
+    gate_default: bool = True,
 ) -> str:
     """Costruisce il documento HTML completo (tabella Live server-side)."""
     timestamp_notifiche = {n.get("timestamp") for n in notifiche}
@@ -1543,7 +1824,7 @@ def genera_html(
         elif chiave == "incertezza":
             pannelli.append(_pannello_incertezza(report, avviso_report, notifiche, test_dir))
         elif chiave == "interattiva":
-            pannelli.append(_pannello_interattiva())
+            pannelli.append(_pannello_interattiva(gate_default))
         else:
             pannelli.append(
                 f'<section class="tab-panel" data-tab="{chiave}">'
@@ -1574,7 +1855,7 @@ def genera_html(
 </header>
 <nav class="tab-bar">{bottoni}</nav>
 <main>{pannelli_html}</main>
-<footer>Dashboard generata localmente — nessuna richiesta di rete.</footer>
+<footer>Dashboard generata localmente — nessuna richiesta di rete. <a href="/allenamento.html">Allenamento dal vivo →</a></footer>
 <script type="application/json" id="dati-analisi">{dati_json}</script>
 <script>
 {_js()}
@@ -1635,16 +1916,32 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="dopo il build, serve il file su http://127.0.0.1:8000 (o variabile PORT)",
     )
+    parser.add_argument(
+        "--no-gate",
+        dest="no_gate",
+        action="store_true",
+        help=(
+            "disattiva il safety gate di default — modalità diagnostica; "
+            "la checkbox nel pannello interattivo può override per richiesta"
+        ),
+    )
     return parser
 
 
-def crea_handler(db_path: Path, directory: Path, agent=None):
+def crea_handler(
+    db_path: Path,
+    directory: Path,
+    agent=None,
+    gate_default: bool = True,
+):
     """Classe handler http: file statici da ``directory`` + API.
 
     - ``GET /api/analisi``: JSON dei record dal DB (sola lettura, tab Live).
     - ``POST /api/valuta``: riceve ``{"parametri": {...}}`` e ritorna la
       traccia completa della pipeline (validazione -> gate -> rete ->
-      soglia -> risposta) per la pagina interattiva.
+      soglia -> risposta) per la pagina interattiva. Il corpo può contenere
+      anche ``"gate"`` (bool, opzionale): assente vale ``gate_default``
+      (modalità diagnostica quando il tool è avviato con ``--no-gate``).
 
     ``agent`` (SupervisedAgent) è opzionale: se omesso ne viene creato uno
     lazy (il modello è caricato/cacheato alla prima richiesta di valutazione).
@@ -1661,21 +1958,64 @@ def crea_handler(db_path: Path, directory: Path, agent=None):
             if self.path == "/api/analisi":
                 self._api_analisi()
                 return
+            if self.path == "/api/allena/stato":
+                try:
+                    import allena_live
+
+                    self._json(200, allena_live.stato_sessione())
+                except Exception as exc:  # mai traceback verso il client
+                    self._json(500, {"errore": str(exc)})
+                return
             super().do_GET()
 
         def do_POST(self):
-            if self.path != "/api/valuta":
-                self._json(404, {"errore": "risorsa non trovata"})
-                return
             try:
                 lunghezza = int(self.headers.get("Content-Length", 0) or 0)
                 corpo = self.rfile.read(lunghezza) if lunghezza else b"{}"
                 dati = json.loads(corpo.decode("utf-8") or "{}")
-                parametri = dati.get("parametri") or {}
-                traccia = trace_analysis(parametri, agente)
-                self._json(200, traccia)
-            except Exception as exc:  # mai traceback verso il client
-                self._json(500, {"errore": str(exc)})
+            except Exception as exc:  # corpo mancante o JSON non valido
+                self._json(400, {"errore": f"corpo JSON non valido: {exc}"})
+                return
+
+            if self.path == "/api/valuta":
+                try:
+                    parametri = dati.get("parametri") or {}
+                    gate = dati.get("gate", gate_default)
+                    if not isinstance(gate, bool):
+                        gate = bool(gate)
+                    traccia = trace_analysis(parametri, agente, gate=gate)
+                    self._json(200, traccia)
+                except Exception as exc:  # mai traceback verso il client
+                    self._json(500, {"errore": str(exc)})
+                return
+
+            if self.path in ("/api/allena/avvia", "/api/allena/step", "/api/allena/reset"):
+                try:
+                    import allena_live
+
+                    if self.path == "/api/allena/avvia":
+                        esito = allena_live.avvia_sessione(
+                            n_hidden=dati.get("n_hidden", 16),
+                            lr=dati.get("lr", 0.05),
+                            batch_size=dati.get("batch_size", 32),
+                            n_campioni=dati.get("n_campioni", 2000),
+                            max_epoche=dati.get("max_epoche", 20),
+                        )
+                    elif self.path == "/api/allena/step":
+                        esito = allena_live.step_sessione(int(dati.get("n_passi", 1)))
+                    else:
+                        esito = allena_live.reset_sessione()
+                    self._json(200, esito)
+                except FileNotFoundError:
+                    self._json(500, {
+                        "errore": "dataset non trovato: eseguire prima "
+                                  "python training/generate_dataset.py"
+                    })
+                except Exception as exc:  # mai traceback verso il client
+                    self._json(500, {"errore": str(exc)})
+                return
+
+            self._json(404, {"errore": "risorsa non trovata"})
 
         def _json(self, codice, oggetto):
             corpo = json.dumps(oggetto, ensure_ascii=False).encode("utf-8")
@@ -1713,7 +2053,10 @@ def crea_handler(db_path: Path, directory: Path, agent=None):
 
 
 def _serve(
-    out_path: Path, db_path: Path, ferma: Optional[threading.Event] = None
+    out_path: Path,
+    db_path: Path,
+    ferma: Optional[threading.Event] = None,
+    gate_default: bool = True,
 ) -> int:
     """Serve il file generato + endpoint /api/analisi (sola lettura).
 
@@ -1742,7 +2085,9 @@ def _serve(
             signal.signal(signal.SIGHUP, _arresta)
 
     porta = int(os.environ.get("PORT", "8000"))
-    handler = crea_handler(db_path, out_path.parent, agent=SupervisedAgent())
+    handler = crea_handler(
+        db_path, out_path.parent, agent=SupervisedAgent(), gate_default=gate_default
+    )
     try:
         server = http.server.ThreadingHTTPServer(("127.0.0.1", porta), handler)
     except OSError as exc:
@@ -1791,6 +2136,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         documento = genera_html(
             analisi, notifiche, avviso, metadati, avviso_metadati,
             report, avviso_report, test_path,
+            gate_default=not args.no_gate,
         )
     except Exception as exc:  # ultima rete di sicurezza: mai traceback finale
         print(f"Errore durante la generazione della dashboard: {exc}", file=sys.stderr)
@@ -1802,8 +2148,20 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     out_path.write_text(documento, encoding="utf-8")
     print(f"Dashboard generata: {out_path}")
 
+    # Pagina "Allenamento dal vivo" (stessa directory: servita da --serve).
+    try:
+        import allena_live
+
+        pagina_allena = out_path.parent / "allenamento.html"
+        pagina_allena.write_text(
+            allena_live.genera_html_allenamento(), encoding="utf-8"
+        )
+        print(f"Pagine generate: {pagina_allena}")
+    except Exception as exc:  # la dashboard resta utilizzabile anche senza
+        print(f"Allenamento live non generato: {exc}", file=sys.stderr)
+
     if args.serve:
-        return _serve(out_path, db_path)
+        return _serve(out_path, db_path, gate_default=not args.no_gate)
     return 0
 
 

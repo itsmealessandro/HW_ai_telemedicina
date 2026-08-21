@@ -33,7 +33,8 @@ HW_persia_privato/
 │   │   └── config.py            #   seed, soglia di incertezza, griglia
 │   ├── training/                #   teacher, generatore dataset, training, metriche
 │   ├── tests/                   #   129 test (unittest)
-│   ├── tools/                   #   dashboard (genera_dashboard.py, _figure.py, launcher)
+│   ├── tools/                   #   dashboard + pagine live (genera_dashboard.py,
+│   │                            #   allena_live.py, _figure.py, launcher)
 │   ├── docs/                    #   contratto, review finale
 │   └── data/                    #   gitignored: dataset congelato, artifact, DB
 ├── archive/
@@ -208,6 +209,32 @@ teacher vs MLP (heatmap, errori), training (curve loss), incertezza
 passo-passo come viene valutato (validazione → safety gate → rete → soglia →
 risposta; richiede `--serve`).
 
+### Allenamento dal vivo (`allenamento.html`)
+
+```bash
+./progetto.sh serve
+# poi apri http://127.0.0.1:8000/allenamento.html
+```
+
+Una pagina separata che mostra la rete che impara **da zero**, in slow-motion.
+"Avvia da zero" crea un MLP con pesi casuali su un sottoinsieme piccolo del
+dataset; i controlli Play / Pausa / "1 passo" / "+10" con velocità regolabile
+eseguono mini-batch uno alla volta via `POST /api/allena/*`. A ogni passo la
+pagina aggiorna, ognuno con la sua spiegazione didattica:
+
+- **loss e accuracy train/val** con curve che si disegnano in diretta;
+- **probabilità softmax su un paziente fisso**: partono quasi uniformi (~33%)
+  e si concentrano sulla classe giusta man mano che la rete impara;
+- **confine di decisione** su canvas (sistolica × glicemia): da rumore caotico
+  a regioni nette;
+- **statistiche dei pesi W1/W2** (media e deviazione standard): il termometro
+  di quanto i parametri si stanno muovendo.
+
+Il training è davvero passo-passo: è il browser a ritardare le chiamate, quindi
+la velocità è arbitraria e si può cambiare al volo; iperparametri modificabili
+(neuroni nascosti, learning rate, campioni, epoche) con riavvio immediato per
+confrontare comportamenti diversi.
+
 ### Documento LaTeX sugli aspetti di IA
 
 ```bash
@@ -247,5 +274,7 @@ progetto (`genera_figure.py`).
 - **Dashboard di visualizzazione (V1-V4)**: completa e integrata su `main`.
 - **Pagina interattiva + script principale**: tab 7 con valutazione
   passo-passo del campione; `progetto.sh` come punto d'ingresso unico.
-- **Suite**: 129/129 test OK; regressione legacy 14/14.
+- **Allenamento dal vivo**: pagina separata (`allenamento.html`) con training
+  minibatch SGD eseguito a passi via API, visibile in slow-motion.
+- **Suite**: 139/139 test OK; regressione legacy 14/14.
 - **Documento LaTeX**: compilato (45 pagine, 11 capitoli).

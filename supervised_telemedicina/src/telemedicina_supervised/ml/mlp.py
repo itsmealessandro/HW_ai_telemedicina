@@ -193,6 +193,18 @@ class MLP:
         self.W2 -= lr * gradi["W2"]
         self.b2 -= lr * gradi["b2"]
 
+    def passo(self, X_b: np.ndarray, y_b: np.ndarray, lr: float) -> Dict[str, np.ndarray]:
+        """Un singolo passo di minibatch SGD: gradienti + aggiornamento pesi.
+
+        Espone come operazione atomica il meccanismo interno di ``train``
+        (gradienti via backpropagation, poi update ``lr * grad``), così gli
+        strumenti didattici possono eseguire e osservare un passo alla volta
+        senza duplicare alcuna logica di addestramento.
+        """
+        gradi = self.gradienti(X_b, y_b)
+        self._aggiorna(gradi, lr)
+        return gradi
+
     # ---------------------------------------------------------- persistenza
 
     def salva(self, percorso: Path, scaler: Optional["StandardScaler"] = None) -> None:

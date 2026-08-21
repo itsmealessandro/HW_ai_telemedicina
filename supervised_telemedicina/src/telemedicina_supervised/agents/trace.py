@@ -20,17 +20,30 @@ from telemedicina_supervised.safety.safety_rules import (
     CLASSI,
     FEATURE_ORDER,
     RANGE_FISIOLOGICI,
+    RANGE_NORMALI,
+    SOGLIE_CRITICHE,
+    SOGLIE_MODERATE,
     analizza,
     valida_parametri,
 )
 
 
-def trace_analysis(parametri: Any, agent: Optional[SupervisedAgent] = None) -> dict:
+def trace_analysis(
+    parametri: Any,
+    agent: Optional[SupervisedAgent] = None,
+    gate: bool = True,
+) -> dict:
     """Restituisce la traccia completa della pipeline di valutazione.
 
     Args:
         parametri: mapping (dict) o oggetto con i 6 attributi ufficiali.
         agent: ``SupervisedAgent`` opzionale (riusato per cache del modello).
+        gate: se True (default) il safety gate ha precedenza assoluta e un
+            caso critico interrompe il flusso (``stopped_at="gate"``). Se
+            False (modalità diagnostica) il gate è solo descrittivo
+            (``safety_gate.attivo=False``, classe_regola registrata per il
+            confronto): la rete viene sempre calcolata e mostrata e la
+            risposta finale arriva da ``agent.predict(..., gate=False)``.
 
     Returns:
         dict con le chiavi: ``input``, ``validazione``, ``safety_gate``,
@@ -45,8 +58,17 @@ def trace_analysis(parametri: Any, agent: Optional[SupervisedAgent] = None) -> d
         "validazione": {
             "valido": valido,
             "errori": list(errori),
-            "range_fisiologici": {
-                k: list(RANGE_FISIOLOGICI[k]) for k in FEATURE_ORDER
+            # Tutte le soglie per feature (fonte unica: safety_rules): servono
+            # al frontend per disegnare le barre a zone (normale/moderata/
+            # critica/fuori range) senza duplicare numeri lato JS.
+            "soglie": {
+                k: {
+                    "fisiologico": list(RANGE_FISIOLOGICI[k]),
+                    "normale": list(RANGE_NORMALI[k]),
+                    "moderata": dict(SOGLIE_MODERATE[k]),
+                    "critica": dict(SOGLIE_CRITICHE[k]),
+                }
+                for k in FEATURE_ORDER
             },
         },
     }
@@ -63,17 +85,19 @@ def trace_analysis(parametri: Any, agent: Optional[SupervisedAgent] = None) -> d
 
     dettagli = analizza(parametri)
     trace["safety_gate"] = {
+        "attivo": gate,
         "classe_regola": dettagli["classe"],
         "anomalie": dettagli["anomalie"],
         "pattern": dettagli["pattern"],
     }
-    if dettagli["classe"] == "alto":
+    if gate and dettagli["classe"] == "alto":
         trace["stopped_at"] = "gate"
         outcome = agent.predict(parametri)
         trace["risposta"] = _risposta(outcome, "gate")
         return trace
 
-    # Non critico: calcola i valori interni della rete per la visualizzazione.
+    # Valori interni della rete per la visualizzazione: calcolati anche per
+    # input critici quando il gate è disattivato (modalità diagnostica).
     modello, _motivo = agent._carica()
     rete = None
     if modello is not None and modello.scaler is not None:
@@ -91,7 +115,7 @@ def trace_analysis(parametri: Any, agent: Optional[SupervisedAgent] = None) -> d
         }
     trace["rete"] = rete
 
-    outcome = agent.predict(parametri)
+    outcome = agent.predict(parametri, gate=gate)
     conf = outcome.confidenza
     soglia = SOGLIA_INCERTEZZA
     trace["soglia_incertezza"] = {
