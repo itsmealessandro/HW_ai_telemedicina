@@ -22,6 +22,18 @@ Il sistema è basato su un'architettura ibrida che combina logica deterministica
 - `archive/legacy_qtable_rule_based/`: Studio di fattibilità iniziale e sistemi legacy.
 - `progetto.sh`: Entry-point centralizzato per test, addestramento e deployment.
 
+## Prerequisiti
+
+- `python3` nel PATH (verificato con Python 3.12).
+- Runtime e training:
+  `pip install -r supervised_telemedicina/requirements.txt`
+  (`numpy>=1.24`).
+- Solo per la dashboard:
+  `pip install -r supervised_telemedicina/requirements_dashboard.txt`
+  (`matplotlib>=3.7`, import lazy).
+- `progetto.sh` è già eseguibile (shebang `#!/usr/bin/env bash`).
+- Il training può richiedere qualche minuto.
+
 ## Istruzioni di Esecuzione
 
 Ecco i comandi essenziali per far funzionare il progetto in pochi secondi. Tutte le operazioni si eseguono dal terminale, nella cartella principale del progetto.
