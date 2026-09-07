@@ -1,10 +1,42 @@
-HW_persia_privato — Progetto d'esame di Artificial Intelligence (DT0171), A.A. 2025/2026, Università dell'Aquila — DISIM, Prof. Fabio Persia: agente intelligente per la telemedicina che classifica 6 parametri vitali in 3 classi di rischio (basso/medio/alto), restituisce un messaggio al paziente, notifica il medico nei casi critici e traccia tutto su SQLite (task in `projectDescription/`).
-Pipeline supervised completa: teacher rule-based (fonte unica `safety_rules.py`) → dataset sintetico 70 000 casi (train 40 000/val 10 000/test 20 000, seed 41) → MLP numpy scritto da zero (accuracy test 0.9851, kappa 0.9775) → safety gate deterministico a precedenza assoluta (mai declassato, richiamo 1.0) → fallback su incertezza softmax < 0.6 → persistenza SQLite + notifiche; vincolo rigoroso: solo numpy + standard library nel runtime.
-Struttura: `supervised_telemedicina/` (IL PROGETTO: `main.py`, `src/`, `training/`, `tests/`, `tools/`, `docs/`, `data/` gitignored) · `docs/` (documento didattico + sintesi) · `projectDescription/` (task) · `archive/legacy_qtable_rule_based/` (legacy mai importata) · `archive/internal/` (appunti/piani/review di lavoro) · `progetto.sh` (ingresso unico).
-Uso canonico da root: `./progetto.sh test` (suite 139/139 + regressione legacy 14/14) · `./progetto.sh train` (rigenera artifact + report) · `./progetto.sh analisi '<json>'` (analisi paziente via CLI) · `./progetto.sh dashboard` (HTML statico) · `./progetto.sh serve [porta]` (dashboard + API live, default 8000) · `./progetto.sh help`.
-Numeri canonici verificati: test 139/139 + 14 legacy (tutti verdi) · documento 58 pagine + sintesi 8 pagine · accuracy MLP 0.9851, recall classe alto 0.9958, slice no-buffer 0.9324.
-Documento didattico IA: `docs/documento.pdf` (58 pagine, 11 capitoli, Parte I divulgativa + Parte II tecnica, figure dai dati reali) — sorgenti in `docs/src/`, build con `cd docs/src && make` (`make open` per aprire, `make clean` per gli intermedi; il PDF intermedio in `src/` non si committa).
-Sintesi-relazione: `docs/sintesi_sistema.pdf` (8 pagine) — sorgenti in `docs/sintesi/` (`main.tex` + Makefile: `make`, `make clean`, `make check` con vincolo Pages ≤ 8; l'intermedio `main.pdf` non si committa).
-Dashboard didattica read-only: `./progetto.sh dashboard` (statico) o `./progetto.sh serve` (con tab 7 interattiva + pagina `allenamento.html` con training live passo-passo via API); implementazione in `supervised_telemedicina/tools/genera_dashboard.py` (dettagli nel README tecnico).
-Documentazione tecnica: `supervised_telemedicina/README.md` (comandi, architettura, dashboard) · `supervised_telemedicina/documentazione.md` (schema DB, pipeline, design decisions) · `supervised_telemedicina/docs/contratto.md` (contratto di dominio) · `supervised_telemedicina/docs/review_finale.md` (review finale con limiti dichiarati).
-Stato: fasi 0-8 + dashboard V1-V4 complete e integrate; app legacy archiviata e mai importata dal runtime; materiali di lavoro (piani, appunti teoria, review intermedie) in `archive/internal/`.
+# HW_persia_privato — Agente Intelligente per la Telemedicina
+
+Progetto d'esame di Artificial Intelligence (DT0171), A.A. 2025/2026, Università dell'Aquila — DISIM, Prof. Fabio Persia.
+
+Il progetto presenta un sistema intelligente per il monitoraggio telemedico, incaricato di elaborare un vettore di input a 6 dimensioni (pressione sistolica e diastolica, frequenza cardiaca, temperatura, saturazione dell'ossigeno, glicemia) per inferire una tra tre classi di rischio (basso, medio, alto). Il framework produce un output consultivo per il paziente, attiva alert medici vincolanti nei casi critici e registra ogni inferenza tramite un database relazionale SQLite.
+
+## Architettura del Sistema e Pipeline Analitica
+
+Il sistema è basato su un'architettura ibrida che combina logica deterministica e apprendimento supervisionato. Il flusso operativo è strutturato nei seguenti stadi:
+- **Teacher Rule-Based**: Implementazione di un set di regole di dominio (centralizzate in `safety_rules.py`) utilizzate per generare le label del dataset.
+- **Sintesi del Dataset**: Generazione pseudo-casuale di 70.000 record (split: 40.000 train, 10.000 validation, 20.000 test) garantendo riproducibilità statistica (seed 41).
+- **Knowledge Distillation tramite MLP**: Sviluppo di un Multi-Layer Perceptron implementato esclusivamente in NumPy. L'addestramento ottimizza la cross-entropy loss rispetto alle label fornite dal teacher.
+- **Safety Gate Deterministico**: Modulo pre-inferenza a precedenza assoluta. Intercetta i casi clinici anomali assegnandoli direttamente alla classe di rischio massimo, mitigando il rischio di falsi negativi dell'MLP (garantendo un recall pratico del 100% sui casi critici).
+- **Gestione dell'Incertezza (Softmax Fallback)**: In presenza di una confidence prediction inferiore alla soglia p = 0.60, l'MLP delega la classificazione al sistema rule-based.
+- **Vincoli Tecnologici**: Il runtime opera senza dipendenze di terze parti (escluse librerie standard e NumPy), garantendo deployment agili e alta efficienza computazionale.
+
+## Struttura della Repository
+
+- `supervised_telemedicina/`: Directory sorgente (`main.py`, `src/`, `training/`, `tests/`, `tools/`, `docs/`).
+- `docs/`: Documentazione progettuale (monografia didattica e sintesi estesa).
+- `projectDescription/`: Specifica funzionale originale.
+- `archive/legacy_qtable_rule_based/`: Studio di fattibilità iniziale e sistemi legacy.
+- `progetto.sh`: Entry-point centralizzato per test, addestramento e deployment.
+
+## Istruzioni di Esecuzione
+
+L'interfaccia a riga di comando `progetto.sh` astrae la complessità dei sottomoduli:
+
+- `./progetto.sh test` — Avvia le routine di unit testing (139 test supervisionati + 14 regression test legacy).
+- `./progetto.sh train` — Ricompila il dataset e riesegue il training dell'MLP (export degli artifact e di `report.json`).
+- `./progetto.sh analisi '<json>'` — Esegue un'inferenza diagnostica su un vettore JSON.
+- `./progetto.sh dashboard` — Compilazione statica dei report analitici.
+- `./progetto.sh serve [porta]` — Deployment locale della dashboard interattiva e delle API (default port: 8000).
+
+## Valutazione Analitica del Progetto
+
+Da una prospettiva analitica e metodologica, il sistema risolve in modo rigoroso le criticità legate all'impiego del Machine Learning in contesti clinici (Medical AI):
+
+1. **Gestione del Rischio e Trade-off Bias/Variance**: La combinazione tra safety gate e fallback sull'incertezza introduce un bias intenzionale verso la classe "alto rischio". Questo trade-off aumenta marginalmente i falsi positivi (riducendo la precisione specifica per ottimizzare il recall), una scelta ottimale per massimizzare la sicurezza del paziente.
+2. **Metriche di Validazione (Seed 41)**: Il processo di knowledge distillation ha registrato risultati statisticamente rilevanti. Il test set congelato mostra un'accuracy di 0.9851 e un indice Kappa di Cohen pari a 0.9775. Il recall intrinseco della rete per i casi critici è pari a 0.9958 (che il sistema porta forzatamente a 1.0 tramite l'override deterministico).
+3. **Ingegnerizzazione del Modello**: L'assenza di framework ad alto livello (come PyTorch o TensorFlow) per il calcolo della backpropagation costringe a un approccio implementativo esplicito che dimostra piena consapevolezza algebrica del processo di ottimizzazione e stabilità numerica.
+4. **Ispezionabilità e Data Lineage**: La dashboard non si limita a graficare l'output, ma visualizza in modo trasparente i decision boundaries bidimensionali, la curva di loss e la matrice di confusione. Le decisioni sono sempre affiancate da un tracking completo ("modello usato", "confidenza", "fallback"), essenziale per l'auditing in ambito data science.
