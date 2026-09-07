@@ -24,13 +24,36 @@ Il sistema è basato su un'architettura ibrida che combina logica deterministica
 
 ## Istruzioni di Esecuzione
 
-L'interfaccia a riga di comando `progetto.sh` astrae la complessità dei sottomoduli:
+Ecco i comandi essenziali per far funzionare il progetto in pochi secondi. Tutte le operazioni si eseguono dal terminale, nella cartella principale del progetto.
 
-- `./progetto.sh test` — Avvia le routine di unit testing (139 test supervisionati + 14 regression test legacy).
-- `./progetto.sh train` — Ricompila il dataset e riesegue il training dell'MLP (export degli artifact e di `report.json`).
-- `./progetto.sh analisi '<json>'` — Esegue un'inferenza diagnostica su un vettore JSON.
-- `./progetto.sh dashboard` — Compilazione statica dei report analitici.
-- `./progetto.sh serve [porta]` — Deployment locale della dashboard interattiva e delle API (default port: 8000).
+### 1. Test del Sistema (Consigliato)
+Assicurati che tutto funzioni correttamente eseguendo i test automatici:
+```bash
+./progetto.sh test
+```
+
+### 2. Preparazione dei Dati e Addestramento
+Genera il set di dati iniziale e addestra il modello di Intelligenza Artificiale. Questa operazione va fatta la prima volta per inizializzare il sistema:
+```bash
+cd supervised_telemedicina
+PYTHONPATH=.:src python3 -m training.generate_dataset
+cd ..
+./progetto.sh train
+```
+
+### 3. Avvio della Dashboard Visiva
+Lancia l'interfaccia grafica per esplorare il progetto e provare il modello in tempo reale:
+```bash
+./progetto.sh serve 8000
+```
+👉 **Apri il tuo browser su: http://127.0.0.1:8000/dashboard.html**
+
+### 4. Analisi di un Paziente da Terminale (Opzionale)
+Se vuoi testare l'algoritmo direttamente dal terminale passando i parametri vitali di un paziente:
+```bash
+./progetto.sh analisi '{"pressione_sistolica":120,"pressione_diastolica":80,"frequenza_cardiaca":75,"temperatura":36.8,"saturazione_ossigeno":98,"glicemia":95}'
+```
+
 
 ## Valutazione Analitica del Progetto
 
