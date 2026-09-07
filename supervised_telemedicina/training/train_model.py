@@ -188,6 +188,22 @@ def main(argv: List[str] | None = None) -> None:
     )
     args = parser.parse_args(argv)
 
+    # Bootstrap clone fresco: se i blocchi congelati mancano (data/ è
+    # gitignored), rigenera il dataset con seed-base 41 invece di crashare.
+    richiesti = [args.data_dir / f"{p}_{n}.npy" for p in ("X", "y") for n in ("train", "val", "test")]
+    if any(not p.is_file() for p in richiesti):
+        from training.generate_dataset import genera_e_salva
+
+        print(f"[bootstrap] dataset assente in {args.data_dir}: rigenero (seed-base={args.seed_base})...")
+        genera_e_salva(
+            seed_base=args.seed_base,
+            n_train=40000,
+            n_val=10000,
+            n_test=20000,
+            out_dir=args.data_dir,
+            buffer_zone=True,
+        )
+
     dati = carica_dataset(args.data_dir)
     preparati, scaler = prepara(dati)
 

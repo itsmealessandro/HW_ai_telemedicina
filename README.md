@@ -54,6 +54,23 @@ Se vuoi testare l'algoritmo direttamente dal terminale passando i parametri vita
 ./progetto.sh analisi '{"pressione_sistolica":120,"pressione_diastolica":80,"frequenza_cardiaca":75,"temperatura":36.8,"saturazione_ossigeno":98,"glicemia":95}'
 ```
 
+### Riferimento rapido dei comandi
+
+- `./progetto.sh test` — Unit testing
+  (139 test supervisionati + 14 regression test legacy).
+- `./progetto.sh train` — Ricompila il dataset
+  e riesegue il training dell'MLP
+  (export degli artifact e di `report.json`).
+- `./progetto.sh analisi '<json>'` — Inferenza
+  diagnostica su un vettore JSON.
+- `./progetto.sh dashboard` — Compilazione statica
+  dei report analitici.
+- `./progetto.sh serve [porta]` — Dashboard interattiva
+  e API in locale (default porta 8000).
+- Clone fresco (senza `data/`, gitignored):
+  `./progetto.sh train && ./progetto.sh dashboard`
+  — il training rigenera da solo il dataset (seed 41)
+  se manca.
 
 ## Valutazione Analitica del Progetto
 
