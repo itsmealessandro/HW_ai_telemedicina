@@ -1,4 +1,4 @@
-# HW_persia_privato — Agente Intelligente per la Telemedicina
+# HW_AI_Telemedicina — Agente Intelligente per la Telemedicina
 
 Progetto d'esame di Artificial Intelligence (DT0171), A.A. 2025/2026, Università dell'Aquila — DISIM, Prof. Fabio Persia.
 
