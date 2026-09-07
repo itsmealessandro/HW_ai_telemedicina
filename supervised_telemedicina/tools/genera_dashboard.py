@@ -1214,13 +1214,16 @@ def _js_interattiva() -> str:
     c.appendChild(s3e); s3e.classList.add('show'); await delay(attesa);
 
     var si = dati.soglia_incertezza || {};
-    var conf = (si.confidenza === null || si.confidenza === undefined) ? 0 : si.confidenza;
+    var confNulla = (si.confidenza === null || si.confidenza === undefined);
+    var confTxt = confNulla ? 'n/d' : Number(si.confidenza).toFixed(4);
     var s4 = stepNode('<div class="nodo-titolo">4. Soglia di incertezza</div>'
       + '<div class="spiega">Il sistema conosce i propri limiti: se la probabilità massima scende sotto ' + si.soglia + ', non si fida della rete e ricade sulle regole testuali (fallback). È la "zona di incertezza": meglio una risposta trasparente basata su regole che una risposta sicura ma sbagliata.</div>');
-    if (si.fallback) {
-      s4.innerHTML += '<div class="nodo-esito stato-fallback">Confidenza ' + Number(conf).toFixed(4) + ' &lt; soglia ' + si.soglia + ' → fallback alle regole.</div>' + scalaConf(si.confidenza, si.soglia);
+    if (confNulla) {
+      s4.innerHTML += '<div class="nodo-esito stato-fallback">Confidenza n/d (soglia ' + si.soglia + ') → valutazione non affidabile, fallback alle regole.</div>' + scalaConf(si.confidenza, si.soglia);
+    } else if (si.fallback) {
+      s4.innerHTML += '<div class="nodo-esito stato-fallback">Confidenza ' + confTxt + ' &lt; soglia ' + si.soglia + ' → fallback alle regole.</div>' + scalaConf(si.confidenza, si.soglia);
     } else {
-      s4.innerHTML += '<div class="nodo-esito stato-ok">Confidenza ' + Number(conf).toFixed(4) + ' ≥ soglia ' + si.soglia + ' → la risposta della rete è affidabile.</div>' + scalaConf(si.confidenza, si.soglia);
+      s4.innerHTML += '<div class="nodo-esito stato-ok">Confidenza ' + confTxt + ' ≥ soglia ' + si.soglia + ' → la risposta della rete è affidabile.</div>' + scalaConf(si.confidenza, si.soglia);
     }
     c.appendChild(s4); s4.classList.add('show'); await delay(attesa);
 
@@ -1240,6 +1243,7 @@ def _js_interattiva() -> str:
   function init() {
     var form = document.getElementById('form-campioni');
     if (!form) return;
+    var inValutazione = false;
     var btnEsempio = document.getElementById('btn-esempio');
     if (btnEsempio) {
       btnEsempio.addEventListener('click', function () {
@@ -1256,6 +1260,8 @@ def _js_interattiva() -> str:
     }
     form.addEventListener('submit', function (ev) {
       ev.preventDefault();
+      if (inValutazione) return;
+      inValutazione = true;
       var stato = document.getElementById('stato-valuta');
       var c = document.getElementById('racconto');
       c.innerHTML = '<p class="segnaposto">Analisi in corso…</p>';
@@ -1266,8 +1272,9 @@ def _js_interattiva() -> str:
         body: JSON.stringify({ parametri: leggiForm(), gate: document.getElementById('gateAttivo').checked })
       }).then(function (r) { return r.json(); }).then(function (dati) {
         if (stato) stato.textContent = '';
-        mostra(dati);
+        mostra(dati).then(function () { inValutazione = false; }, function () { inValutazione = false; });
       }).catch(function () {
+        inValutazione = false;
         if (stato) stato.textContent = 'Errore di rete (serve attivo con --serve?)';
       });
     });

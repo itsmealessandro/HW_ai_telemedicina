@@ -11,7 +11,7 @@ etichettato dal teacher, training riproducibile, inferenza con fallback
 sicuro e tracciamento di ogni analisi.
 
 > **Stato: tutte le fasi 0-7 complete** (piano in 8 fasi, Fase 8 =
-> documentazione). Suite: **127/127 test OK** (incluse le 4 fasi della
+> documentazione). Suite: **139/139 test OK** (incluse le 4 fasi della
 > dashboard di visualizzazione); regressione legacy: **14/14**.
 
 ## Vincolo di progetto
@@ -36,7 +36,7 @@ supervised_telemedicina/
 │   ├── models/vital_parameters.py   # oggetto parametri vitali
 │   └── config.py                    # path, seed, griglia, soglia di incertezza
 ├── training/                        # teacher, generatore dataset, training, metriche
-├── tests/                           # 109 test (unittest)
+├── tests/                           # 139 test (unittest)
 └── data/                            # gitignored: dataset congelato, artifact, DB
 ```
 
@@ -74,7 +74,7 @@ vengono sempre persistiti su SQLite.
 ## Test
 
 ```bash
-PYTHONPATH=src python -m unittest discover -s tests   # 109/109
+PYTHONPATH=src python -m unittest discover -s tests   # 139/139
 ```
 
 Regressione della suite legacy (dal root del repo):
@@ -108,19 +108,26 @@ non li tocca mai.
 
 Strumento didattico **read-only** che visualizza il sistema supervised in 6
 viste, in un unico file HTML autonomo (CSS/JS inline, nessuna richiesta di
-rete). Generato da `tools/genera_dashboard.py`:
+rete). Punto d'ingresso canonico (dalla root del repo):
+
+```bash
+./progetto.sh dashboard         # build statico in data/dashboard.html
+./progetto.sh serve [porta]     # dashboard + API interattive (default porta 8000)
+```
+
+Dettagli di implementazione (non canonici, solo per debug/sviluppo):
+`tools/genera_dashboard.py` genera l'HTML (`--out`, `--db-path`,
+`--metadati-path`, `--report-path`, `--test-path`; `--serve` aggiunge
+l'endpoint `GET /api/analisi` per il pulsante "Aggiorna" della vista Live) e
+`tools/avvia_dashboard.sh` è un launcher legacy (build + server + browser,
+porta custom con `PORT=8001 tools/avvia_dashboard.sh`).
 
 ```bash
 python tools/genera_dashboard.py                          # build statico
 python tools/genera_dashboard.py --serve                  # build + http://127.0.0.1:8000
 python tools/genera_dashboard.py --out OUT --db-path DB   # output/database custom
 python tools/genera_dashboard.py --metadati-path M --report-path R --test-path D
-tools/avvia_dashboard.sh                                  # avvio rapido: build + server + browser
 ```
-
-Il launcher `tools/avvia_dashboard.sh` gestisce avvio e chiusura: build,
-server, apertura automatica del browser e chiusura pulita con `Ctrl+C`
-(nessun traceback; porta custom con `PORT=8001 tools/avvia_dashboard.sh`).
 
 Opzioni: `--out` (default `data/dashboard.html`), `--db-path` (default
 `data/analisi.db`), `--metadati-path` (default `data/processed/metadati.json`),

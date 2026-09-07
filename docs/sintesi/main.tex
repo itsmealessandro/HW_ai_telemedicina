@@ -1,0 +1,342 @@
+% main.tex — Relazione breve: sistema di telemedicina supervised_telemedicina
+% Standalone: compila con make -> ../sintesi_sistema.pdf
+\documentclass[11pt,a4paper]{article}
+
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage[italian]{babel}
+\usepackage[a4paper,margin=2.5cm]{geometry}
+\usepackage{amsmath,amssymb}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{hyperref}
+\usepackage{tikz}
+\usetikzlibrary{positioning,arrows.meta,shapes.geometric,calc}
+\usepackage{listings}
+\usepackage{xcolor}
+
+\hypersetup{colorlinks=true,linkcolor=blue!60!black,urlcolor=blue!60!black,citecolor=green!40!black,
+  pdftitle={Sistema di telemedicina: sintesi del sistema}}
+
+\definecolor{codebg}{RGB}{245,245,245}
+\lstdefinestyle{compact}{language=Python,backgroundcolor=\color{codebg},
+  basicstyle=\ttfamily\footnotesize,breaklines=true,frame=single,
+  rulecolor=\color{black!20},numbers=none,tabsize=4,aboveskip=4pt,belowskip=4pt,
+  literate={à}{{\`a}}1 {è}{{\`e}}1 {é}{{\'e}}1 {ì}{{\`i}}1 {ò}{{\`o}}1 {ù}{{\`u}}1}
+\lstset{style=compact}
+\newcommand{\codice}[1]{\texttt{#1}}
+\newcommand{\file}[1]{\texttt{#1}}
+
+\begin{document}
+
+% =====================================================================
+% Copertina esecutiva
+\begin{center}
+{\Large\bf Telemedicina supervisionata: MLP da 323 parametri con safety gate\par}
+{\large accuracy 0.9851 sul test, recall sui critici 1.0 per costruzione\par}
+\vspace{4pt}
+{\normalsize Sintesi del progetto \file{supervised\_telemedicina} \quad\textbullet\quad seed 41 \quad\textbullet\quad \today\par}
+\end{center}
+
+\begin{quote}\small
+\textbf{Abstract.} Il task è classificazione supervisionata di sei parametri
+vitali in tre classi di rischio (\codice{basso}/\codice{medio}/\codice{alto}),
+più risposta \codice{errore} per input invalidi. Un teacher rule-based
+(\file{safety/safety\_rules.py}) etichetta offline 40\,000 + 10\,000 + 20\,000
+campioni sintetici (seed 41/42/43); un MLP numpy da 323 parametri (6~$\to$~32~$\to$~3;
+griglia: hidden 32, lr 0.05, batch 32) ne distilla le regole. A runtime il
+safety gate ha precedenza assoluta e la soglia di incertezza 0.6 attiva il
+fallback \codice{max(regole, MLP)}; ogni esito è persistito su SQLite, con
+notifica al medico per critici e invalidi. Sul test congelato (20\,000):
+accuracy 0.9851, kappa 0.9775, recall \codice{alto} 0.9958 (i 30 casi persi
+dall'MLP sono coperti dal gate: sistema 1.0); senza buffer zone 0.9324.
+Limite: 0.9851 misura fedeltà a regole sintetiche, non validità clinica.
+\end{quote}
+
+\begin{table}[h]
+\centering
+\caption{Risultati principali (da \file{data/models/report.json}, seed 41, test 20\,000).}
+\label{tab:ris}
+\begin{tabular}{lcl}
+\toprule
+\textbf{Misura} & \textbf{Valore} & \textbf{Note} \\
+\midrule
+Accuracy test & 0.9851 & 19\,702/20\,000; kappa 0.9775 \\
+Recall classe \codice{alto} & 0.9958 $\to$ 1.0 & 30 persi dall'MLP, coperti dal gate \\
+Accuracy senza buffer & 0.9324 & casi limite inclusi; kappa 0.8959 \\
+Baseline rule-based & 1.0 & accordo del teacher sulle proprie label \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{figure}[h]
+\centering
+\resizebox{\linewidth}{!}{%
+\begin{tikzpicture}[
+  box/.style={rectangle,draw,rounded corners,minimum width=2.2cm,minimum height=0.9cm,align=center,font=\footnotesize},
+  dia/.style={diamond,draw,aspect=2,align=center,font=\footnotesize,inner sep=2pt},
+  arr/.style={-{Stealth},thick,shorten >=2pt,shorten <=2pt},
+  lab/.style={font=\scriptsize,align=center}]
+  \node[box] (v) {6 parametri\\vitali};
+  \node[box,right=0.6cm of v] (g) {safety gate\\rule-based};
+  \node[dia,right=0.6cm of g] (d) {critico\\o invalido?};
+  \node[box,right=0.6cm of d] (m) {MLP numpy\\conf.\ $\ge$ 0.6};
+  \node[box,right=0.6cm of m] (o) {messaggio\\paziente};
+  \node[box,right=0.6cm of o] (db) {SQLite +\\alert medico};
+  \draw[arr] (v) -- (g);
+  \draw[arr] (g) -- (d);
+  \draw[arr] (d) -- node[lab,above]{no} (m);
+  \draw[arr] (m) -- node[lab,above]{s\`i} (o);
+  \draw[arr] (o) -- (db);
+  \draw[arr,rounded corners] (d.north) -- ++(0,0.55) -| node[lab,pos=0.25,above]{s\`i: bypass MLP} (o.north);
+  \node[lab,below=0.15cm of m] {sotto 0.6: fallback max(regole, MLP)};
+\end{tikzpicture}%
+}
+\caption{Schema del sistema: il gate decide
+prima dell'MLP; critici e invalidi lo bypassano.}
+\label{fig:schema}
+\end{figure}
+
+% =====================================================================
+\section{Architettura e pipeline}\label{sec:architettura}
+
+A runtime ogni analisi segue un unico percorso:
+\codice{CLI} $\to$ \codice{AnalysisService.analizza()} $\to$
+\codice{SupervisedAgent} (safety gate $\to$ MLP) $\to$ SQLite + notifiche.
+La CLI (\file{main.py}) si limita a chiamare il service: un eventuale canale
+futuro (API, webapp) riusa persistenza e notifiche passando dallo stesso
+punto. Offline e runtime si legano in cinque passi: (1)~il teacher rule-based
+etichetta i dati; (2)~il dataset sintetico congelato (40/10/20k, seed
+41/42/43) non viene mai rigenerato; (3)~la griglia prova 6 configurazioni MLP
+e trattiene quella con loss di validazione minima, con riaddestramento finale
+e scaler salvato nell'artifact; (4)~l'agente applica gate $\to$ MLP $\to$ soglia di incertezza $\to$
+\codice{max(regole, MLP)}; (5)~\codice{AnalysisService.analizza()} valida l'input, interroga
+l'agente, scrive su SQLite e, per critici e invalidi, registra la notifica in
+\codice{notifiche} e la stampa su stderr. Dettagli in Sez.~\ref{sec:dati}--\ref{sec:sicurezza}.
+
+% =====================================================================
+\section{Risultati}\label{sec:risultati}
+
+Tutti i numeri vengono da \file{data/models/report.json} (seed 41). Sul test
+congelato (20\,000 campioni) l'MLP raggiunge accuracy \textbf{0.9851}
+(19\,702 corrette) e kappa di Cohen \textbf{0.9775}; per la classe
+\codice{alto} precision 0.9863 e recall \textbf{0.9958}: su 7\,100 veri
+\codice{alto} ne riconosce 7\,070 e ne perde 30, coperti dal gate
+(Sez.~\ref{sec:sicurezza}). Gli errori cadono quasi sempre tra classi vicine:
+nessun \codice{basso} è predetto \codice{alto} e viceversa
+(Tab.~\ref{tab:conf}).
+
+\begin{table}[htbp]
+\centering
+\caption{Matrice di confusione sul test (20\,000; righe = vero, colonne = predetto).}
+\label{tab:conf}
+\begin{tabular}{lrrr}
+\toprule
+ & \textbf{pred.\ basso} & \textbf{pred.\ medio} & \textbf{pred.\ alto} \\
+\midrule
+vero \codice{basso} & 7\,113 & 107 & 0 \\
+vero \codice{medio} & 63 & 5\,519 & 98 \\
+vero \codice{alto} & 0 & 30 & 7\,070 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Con $\kappa=0.9775$ l'accordo col teacher è quasi perfetto. Il test senza
+buffer (campioni vicini alle soglie inclusi) scende a \textbf{0.9324} (kappa
+0.8959): il numero ufficiale è valido ma ottimistico sui casi limite. I
+\textbf{298 errori} si addensano ai confini (distanza media dalle soglie
+0.524, massima 0.681): dove il teacher è netto l'MLP impara bene, dove la
+classe cambia a gradino i confini curvi del modello sbagliano di una classe.
+La baseline rule-based vale 1.0 sulle proprie label: 0.9851 misura fedeltà
+alle regole sintetiche, non accuratezza su pazienti reali. Il codice è
+coperto da \textbf{139 test} (unittest, comandi in Sez.~\ref{sec:uso}), più 14
+di regressione legacy mai importati dal runtime.
+
+% =====================================================================
+\section{Dati e teacher rule-based}\label{sec:dati}
+
+Le sei feature (\codice{FEATURE\_ORDER} in \file{safety\_rules.py}:
+pressioni sistolica/diastolica, frequenza cardiaca, temperatura, saturazione,
+glicemia; unità e range in Tab.~\ref{tab:feature}) seguono standardizzazione
+$x'=(x-\mu)/\sigma$ con statistiche del solo train; lo scaler resta salvato
+nell'artifact e \file{metadati.json} registra gli hash sha256 dei dati. Il
+generatore (\file{training/synthetic\_generator.py}) campiona profili clinici
+da gaussiane troncate con vincolo sistolica $>$ diastolica ($\ge$ 10 mmHg) e
+scarta i campioni troppo vicini alle soglie (margini 2.0/2.0/1.0/0.2/1.0/2.0;
+oltre 52\,000 scartati per 40\,000 di train). Gli split sono congelati in
+\file{data/processed/} (Tab.~\ref{tab:split}).
+
+Il teacher (\codice{classifica\_rischio} in \file{safety\_rules.py}, soglie
+critiche in Tab.~\ref{tab:soglie}) controlla validità, assegna gravità per parametro, cerca pattern
+combinati (es.\ ipotensione + tachicardia) e decide: pattern/anomalia critica $\to$ \codice{alto}, altra anomalia $\to$
+\codice{medio}, altrimenti \codice{basso}. Il teacher offline
+(\codice{TeacherRules}) riusa la stessa funzione: label ed gate non possono
+divergere (guard test anti-duplicazione) e l'accordo sulle proprie label è
+1.0 su 20\,000, limite superiore dell'MLP. Resta rigido: soglie a gradino
+manuali, punto di partenza non oracolo clinico.
+
+% =====================================================================
+\section{Modello MLP numpy e training}\label{sec:modello}
+
+MLP 6~$\to$~32~$\to$~3 da 323 parametri ($(6{\times}32{+}32)+(32{\times}3{+}3)$,
+inizializzazione di He): combinazioni lineari + ReLU nascosta e softmax in
+uscita, allenato su cross-entropy con backpropagation; il
+gradient check dà errore relativo $\sim$$10^{-10}$ (soglia test
+$<2{\times}10^{-5}$). Early stopping a pazienza 5 su loss di validazione; la
+griglia (hidden 16/32/64 $\times$ lr 0.01/0.05, batch 32/64, 25 epoche) sceglie
+\codice{hidden=32, lr=0.05, batch=32} (loss val $\approx 0.051$) senza mai
+guardare il test; seguono riaddestramento, artifact e report (in
+\file{data/models/}: \file{mlp\_telemedicina.npz} e \file{report.json}).
+
+Il legame teacher--studente è knowledge distillation (Hinton et al., 2015):
+l'MLP approssima le regole con confini morbidi vedendo solo risposte del
+teacher su sintetici, quindi ogni metrica è fedeltà alle regole; i 298 errori
+di approssimazione sono contenuti dal gate.
+
+% =====================================================================
+\section{Sicurezza, incertezza e fallback}\label{sec:sicurezza}
+
+Le prime righe di \codice{SupervisedAgent.predict} applicano le regole prima
+di ogni inferenza: se dicono \codice{alto}, l'MLP non viene consultato e il
+recall di sistema sui critici vale 1.0 per costruzione; la regola
+\codice{max(rule-based, MLP)} permette al modello solo di alzare, mai di
+abbassare (qualche falso positivo in più, accettato). Sui non critici la
+confidenza $\max(p)$ sotto \codice{SOGLIA\_INCERTEZZA = 0.6} rimanda alle
+regole con motivo registrato: la softmax non è calibrata, ma dove il modello
+è debole il sistema diventa conservativo. Ogni analisi è tracciabile in
+SQLite (\codice{modello\_usato}, \codice{classe\_mlp},
+\codice{classe\_regola}, \codice{confidenza}, \codice{fallback},
+\codice{motivo\_fallback}, \codice{override\_sicurezza}); se il DB non è
+scrivibile \codice{analizza()} solleva \codice{ValueError}. Critici e invalidi
+producono doppia notifica (riga \codice{notifiche} + stderr), emessa dal
+service.
+
+% =====================================================================
+\section{Uso e conclusioni}\label{sec:uso}
+
+Uso da root con bash + python3 tramite \file{progetto.sh}:
+
+\begin{lstlisting}[caption={Comandi principali di \file{progetto.sh}.}]
+./progetto.sh test              # suite (139 test) + regressione legacy (14)
+./progetto.sh train             # rigenera artifact MLP + report.json
+./progetto.sh analisi '{...}'   # analizza un paziente, persiste su SQLite
+./progetto.sh dashboard         # dashboard statica in data/dashboard.html
+./progetto.sh serve [porta]     # dashboard + API su 127.0.0.1:porta
+\end{lstlisting}
+Il training esplicito sovrascrive artifact e report in qualche minuto; se
+l'artifact manca, il runtime usa il rule-based e lo dichiara. La dashboard
+(unico punto con matplotlib, dipendenza di sviluppo) mostra in sola lettura
+analisi, flusso, confronto teacher-vs-MLP, training e incertezza. Un caso come
+\codice{(185,110,80,36.8,98,95)} (crisi ipertensiva) è intercettato dal gate,
+che avvisa il medico.
+
+Il sistema copre il task end-to-end (parametri $\to$ classe $\to$ messaggio
+$\to$ alert $\to$ DB): l'MLP riproduce il teacher nel 98.5\,\% dei casi, il
+gate porta il recall sui critici a 1.0, la soglia 0.6 dichiara l'incertezza
+invece di nasconderla. Limiti: dataset sintetico, test ottimistico (0.9851
+vs 0.9324), soglie legacy non validate da clinici, softmax non calibrata,
+notifica persa se il suo insert fallisce dopo quello dell'analisi,
+thread-safety non garantita. Sviluppi: dati reali anonimizzati, calibrazione,
+SHAP/LIME, drift monitoring, più classi o indice continuo.
+
+% =====================================================================
+\appendix
+\section{Tabelle, esempio e PEAS}\label{sec:appendice}
+
+\begin{table}[htbp]
+\centering
+\caption{Messaggi al paziente e allerta medico per classe (da \file{services/analysis\_service.py}).}
+\label{tab:messaggi}
+\small
+\begin{tabular}{lp{8cm}c}
+\toprule
+\textbf{Classe} & \textbf{Messaggio al paziente} & \textbf{Allerta} \\
+\midrule
+\codice{basso} & ``I tuoi parametri vitali risultano nella norma. Continua il monitoraggio regolare.'' & no \\
+\codice{medio} & ``Sono state rilevate alcune anomalie. Ti consigliamo di contattare il tuo medico e ripetere la misurazione.'' & no \\
+\codice{alto} & ``Sono stati rilevati parametri critici. Ti consigliamo di contattare subito un medico o recarti al pronto soccorso.'' & sì \\
+\codice{errore} & messaggio di errore con la lista dei problemi rilevati & sì \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{table}[htbp]
+\centering
+\caption{Le sei feature: unità e range normale (da \codice{RANGE\_NORMALI}).}
+\label{tab:feature}
+\small
+\begin{tabular}{lll}
+\toprule
+\textbf{Feature} & \textbf{Unità} & \textbf{Range normale} \\
+\midrule
+\codice{pressione\_sistolica} & mmHg & 90--140 \\
+\codice{pressione\_diastolica} & mmHg & 60--90 \\
+\codice{frequenza\_cardiaca} & bpm & 60--100 \\
+\codice{temperatura} & \textdegree{}C & 36.0--37.5 \\
+\codice{saturazione\_ossigeno} & \% & 95--100 \\
+\codice{glicemia} & mg/dL & 70--140 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{table}[htbp]
+\centering
+\caption{Soglie critiche per parametro (da \file{safety\_rules.py}).}
+\label{tab:soglie}
+\small
+\begin{tabular}{ll}
+\toprule
+\textbf{Parametro} & \textbf{Soglia critica} \\
+\midrule
+\codice{pressione\_sistolica} & $\geq$ 180 mmHg \\
+\codice{pressione\_diastolica} & $\geq$ 110 mmHg \\
+\codice{frequenza\_cardiaca} & $\geq$ 120 oppure $\leq$ 50 bpm \\
+\codice{temperatura} & $\geq$ 38.5 oppure $\leq$ 35.0 \textdegree{}C \\
+\codice{saturazione\_ossigeno} & $\leq$ 90 \% \\
+\codice{glicemia} & $\geq$ 200 oppure $\leq$ 60 mg/dL \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{table}[htbp]
+\centering
+\caption{Split congelato (seed base 41).}
+\label{tab:split}
+\small
+\begin{tabular}{lrr}
+\toprule
+\textbf{Blocco} & \textbf{Seed} & \textbf{Campioni} \\
+\midrule
+train & 41 & 40\,000 \\
+validation & 42 & 10\,000 \\
+test & 43 & 20\,000 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{lstlisting}[caption={Esempio di analisi di un paziente stabile.}]
+./progetto.sh analisi '{"pressione_sistolica":120,"pressione_diastolica":80,\
+"frequenza_cardiaca":75,"temperatura":36.8,\
+"saturazione_ossigeno":98,"glicemia":95}'
+\end{lstlisting}
+L'output riporta classe (\codice{basso}), messaggio al paziente e metadati
+dell'esito (chi ha deciso, confidenza, eventuale fallback).
+
+In termini PEAS: performance = accuratezza, correttezza delle notifiche e
+tempi di risposta; ambiente = paziente, wearable, medico e storico
+(parzialmente osservabile, multi-agente, non deterministico, sequenziale,
+dinamico); attuatori = messaggio, notifica e scrittura DB; sensori = i sei
+vitali --- per questo il progetto ibrida MLP e regole con precedenza delle
+regole.
+
+\begin{thebibliography}{9}
+\bibitem{task} Task del progetto, \file{projectDescription/task.txt} (HW\_persia\_privato).
+\bibitem{contract} Contratto di dominio: feature, classi, safety (fonte unica: \file{safety\_rules.py}).
+\bibitem{impl} Mappa concetti del corso $\to$ progetto, \file{knowledge/09\_implicazioni\_progetto.md} (PEAS, supervised vs RL, neuro-simbolico, AI Act).
+\bibitem{doc} Documentazione tecnica, \file{supervised\_telemedicina/documentazione.md} (pipeline, DB, design decisions, report seed 41).
+\bibitem{goodfellow} I.~Goodfellow, Y.~Bengio, A.~Courville, \textit{Deep Learning}, MIT Press, 2016.
+\bibitem{hinton} G.~Hinton, O.~Vinyals, J.~Dean, Distilling the Knowledge in a Neural Network, arXiv:1503.02531, 2015.
+\bibitem{bishop} C.~M.~Bishop, \textit{Pattern Recognition and Machine Learning}, Springer, 2006.
+\end{thebibliography}
+
+\end{document}

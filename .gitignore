@@ -213,7 +213,7 @@ marimo/_lsp/
 __marimo__/
 /knowledge
 
-# Artefatti di build LaTeX (sorgenti in docs/src, PDF compilato in docs/)
+# Artefatti di build LaTeX (sorgenti in docs/src e docs/sintesi, PDF canonici in docs/)
 *.aux
 *.bbl
 *.blg
@@ -223,3 +223,4 @@ __marimo__/
 *.lot
 docs/*.pdf
 docs/src/*.pdf
+docs/sintesi/*.pdf

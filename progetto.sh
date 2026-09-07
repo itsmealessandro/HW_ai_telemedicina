@@ -4,7 +4,7 @@
 # Gestisce tutte le operazioni comuni dal un solo posto, dalla root del
 # repository (funziona da qualsiasi directory corrente):
 #
-#   ./progetto.sh test              suite principale (129 test) + regressione legacy
+#   ./progetto.sh test              suite principale (139 test) + regressione legacy (14)
 #   ./progetto.sh train             training: rigenera artifact MLP + report
 #   ./progetto.sh analisi '<json>'  runtime: analizza un paziente via CLI
 #   ./progetto.sh dashboard         genera la dashboard statica (data/dashboard.html)
@@ -41,7 +41,7 @@ ${BOLD}HW_persia_privato — agente intelligente per la telemedicina${RESET}
 Uso: ./progetto.sh <comando> [argomenti]
 
 Comandi:
-  ${BOLD}test${RESET}                  suite principale (129 test) + regressione legacy (14)
+  ${BOLD}test${RESET}                  suite principale (139 test) + regressione legacy (14)
   ${BOLD}train${RESET}                 training supervised: rigenera artifact MLP + report.json
   ${BOLD}analisi${RESET} '<json>'      analizza un paziente (CLI, persiste su SQLite)
   ${BOLD}dashboard${RESET}             genera la dashboard statica in data/dashboard.html

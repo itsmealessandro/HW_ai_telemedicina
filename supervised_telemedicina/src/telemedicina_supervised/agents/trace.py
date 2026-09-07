@@ -36,7 +36,7 @@ def trace_analysis(
     """Restituisce la traccia completa della pipeline di valutazione.
 
     Args:
-        parametri: mapping (dict) o oggetto con i 6 attributi ufficiali.
+        parametri: mapping (dict) con i 6 parametri ufficiali.
         agent: ``SupervisedAgent`` opzionale (riusato per cache del modello).
         gate: se True (default) il safety gate ha precedenza assoluta e un
             caso critico interrompe il flusso (``stopped_at="gate"``). Se
