@@ -18,11 +18,9 @@
   \vspace*{2cm}
   {\Huge\bfseries Intelligenza artificiale nel progetto\\[0.4em] \texttt{supervised\_telemedicina}\par}
   \vspace{1.2cm}
-  {\Large In due parti: una spiegazione semplice per chi non conosce l'IA,
-  e l'analisi tecnica del sistema\par}
+  {\Large Analisi tecnica del sistema\par}
   \vspace{2.5cm}
-  {\large Documento didattico. Parte I per chi non conosce l'IA; Parte II per
-  chi sa programmare.\par}
+  {\large Documento tecnico: si presuppone di saper programmare.\par}
   \vfill
   {\large \today\par}
   \vspace{1cm}
@@ -32,25 +30,23 @@
 \clearpage
 
 % ---------------------------------------------------------------------------
-% Parte I — Spiegazione per tutti (senza prerequisiti di IA)
-% ---------------------------------------------------------------------------
-\part{Spiegazione per tutti: il sistema spiegato in modo semplice}
+% NOTA — Parte divulgativa (capitoli p1_01--p1_06, spiegazione semplice):
+% esclusa dalla build per il prof. I file .tex restano in capitoli/, basta
+% decommentare gli \input qui sotto per reincluderla.
+% \part{Spiegazione per tutti: il sistema spiegato in modo semplice}
+% \input{capitoli/p1_01_idea}
+% \input{capitoli/p1_02_teacher}
+% \input{capitoli/p1_03_dati}
+% \input{capitoli/p1_04_rete}
+% \input{capitoli/p1_05_distillazione}
+% \input{capitoli/p1_06_sicurezza}
 
-\input{capitoli/p1_01_idea}
-\input{capitoli/p1_02_teacher}
-\input{capitoli/p1_03_dati}
-\input{capitoli/p1_04_rete}
-\input{capitoli/p1_05_distillazione}
-\input{capitoli/p1_06_sicurezza}
-
 % ---------------------------------------------------------------------------
-% Parte II — Analisi tecnica del sistema (contenuto esistente)
+% Analisi tecnica del sistema
 % ---------------------------------------------------------------------------
-\part{Analisi tecnica del sistema}
 
 \begin{quote}
 \itshape
-La Parte I ha già dato la spiegazione semplice per chi non conosce l'IA.
 Qui andiamo direttamente sul tecnico, senza riassunti introduttivi: il cuore
 del documento è capire cosa è l'MLP, cosa è la knowledge distillation e come
 viene effettivamente addestrata la rete, cioè come cambiano i suoi pesi (dalla
@@ -134,6 +130,12 @@ suddivisione in due parti.
         mostrava una vera curva; il grafico a destra è stato sostituito con una
         funzione di attivazione non lineare disegnata come curva liscia
         (sigmoide), mantenendo il riferimento alla ReLU usata nel progetto.
+  \item \textbf{2026-09-08 --- Esclusione della Parte I dalla build.} I
+        capitoli divulgativi \texttt{p1\_01}--\texttt{p1\_06} (con il relativo
+        \texttt{\textbackslash part\{\}}) sono stati commentati in
+        \texttt{documento.tex}: i file restano in \texttt{capitoli/} ma non
+        vengono più compilati nel PDF per il prof. Aggiornati di conseguenza
+        frontespizio e introduzione dell'analisi tecnica.
 \end{enumerate}
 
 \end{document}

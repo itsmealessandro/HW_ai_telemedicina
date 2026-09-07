@@ -38,7 +38,7 @@ Uso:
 
 ```bash
 cd src
-make          # compila documento.pdf (58 pagine)
+make          # compila documento.pdf (47 pagine)
 make open     # compila e apre
 ```
 
